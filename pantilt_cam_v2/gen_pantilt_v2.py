@@ -3,16 +3,19 @@
 Pan/tilt camera head v2 - ESP32-S3-CAM pod, 2x MG90S (SG90 footprint) servos,
 2x HLK-LD2410C radars on the pan head looking +/-45 deg from the camera axis.
 
-Everything is generated from the parameters in P below with manifold3d (exact
-CSG) and written out as STLs plus a Bambu Studio 3MF (two A1 mini plates).
+v2.1: the pan axis is a FIXED HOLLOW POST on the base (wires go up through it), the pan
+servo sits on the head and walks a 40T pinion around a fixed 20T gear on the post, so a
+180 deg servo turns the head a full 360 deg and nothing but the two power wires crosses
+the joint.  The pod's leads all leave through slots in the back cover.
+
+Everything is generated from the parameters in P below with manifold3d (exact CSG) and
+written out as STLs plus a Bambu Studio 3MF (two A1 mini plates).
 
 World frame (assembled, pan = 0, tilt = 0):
-  X = right when standing behind the camera, Y = backwards (camera looks -Y),
-  Z = up.  Base plate top is Z = 0.  Pan axis is the Z axis.
-
-Run:  python3 gen_pantilt_v2.py            -> writes out/*.stl, out/*.3mf, checks
+  X = right when standing behind the camera, Y = backwards (camera looks -Y), Z = up.
+  Base plate top is Z = 0.  Pan axis is the Z axis.
 """
-import math, os, sys, json
+import math, os, sys
 import numpy as np
 from manifold3d import Manifold, CrossSection, JoinType
 
@@ -31,43 +34,53 @@ P = dict(
     srv_shaft_off=6.0,               # shaft axis -> nearest end face
     srv_hole_cc=28.0,                # ear screw holes centre-to-centre (27.5..28.5 seen)
     srv_upper_h=4.0,                 # ear top -> flat top of upper case
-    srv_dome_d=12.0, srv_dome_top=8.6,   # round gear cover, height above seat
+    srv_dome_d=12.0, srv_dome_top=8.6,   # round gear cover, height above ear UNDERSIDE
     srv_collar_d=6.0, srv_collar_top=9.0,
-    srv_spline_d=4.8, srv_spline_z0=9.0, srv_spline_z1=12.4,  # above seat (MG90S)
+    srv_spline_d=4.8, srv_spline_z0=9.0, srv_spline_z1=12.4,  # above ear underside (MG90S)
     srv_lead_w=4.0, srv_lead_t=1.5,
     # pockets / sockets cut for the servo
-    pocket_L=23.4, pocket_W=12.9, pocket_depth=17.0,
+    pocket_L=23.4, pocket_W=12.9,
     pilot_w=1.8, pilot_len=2.4, pilot_depth=6.0,     # slotted pilot holes for the kit screws
     socket_d=4.7, socket_depth=5.0,                  # spline press-fit socket
     socket_cb_d=13.0, socket_cb_depth=0.8,           # clearance for the gear-cover dome
     screw_d=2.3,                                     # kit M2 centre screw
-    seat_to_face=8.5,                                # ear UNDERSIDE (seat) -> socket entrance face (pan)
-    # tilt servo goes through the wall from outside, so its ear TOP face is the contact plane:
-    # socket entrance face is (seat_to_face - srv_ear_t) = 6.0 inboard of the wall's outer face
+    # servo inserted through a wall/plate with its ear TOP against the surface: the socket entrance
+    # face sits (8.5 - ear_t) = 6.0 past that surface; spline 6.5..9.9, dome top 6.1 past it.
+    seat_to_face=8.5,
 
-    # ---- base plate + pan turret ----
+    # ---- base plate + fixed hollow post with the fixed 20T gear ----
     base_x=100.0, base_y=80.0, base_t=4.0,
     base_hole_d=4.5, base_cb_d=9.0, base_cb_depth=1.5, base_hole_inset=8.0,
-    seat_z=15.0,                     # pan servo ear seat above plate top
-    turret_od=51.0, ring_id=47.0, ring_top=10.0,     # ring top above seat
-    turret_foot_od=59.0, turret_foot_h=4.0,
-    lead_w=9.0, lead_h=4.5,          # pan lead tunnel (JR plug 7.7 x 2.6 passes)
-    drain_d=5.0,
+    head_under=20.0,                 # world Z of the head plate underside (= collar top, thrust face)
+    post_od=13.0, post_bore=9.0,     # hollow pivot post
+    post_top_above=14.0,             # post top above the head plate top
+    collar_d=17.5, collar_h=0.4,     # smooth thrust collar under the head (inside the pinion's reach)
+    gear_m=1.0, gear_base_T=20, gear_pin_T=40, gear_pa=20.0, gear_backlash=0.2,
+    gear_h=13.0,                     # fixed gear face width (top at collar bottom)
+    foot_d=40.0, foot_h=6.5,         # cone foot of the post on the base plate (ends at the gear tip dia)
+    cable_slot_w=6.0, cable_slot_h=6.0,
+    bush_clear=0.2,                  # radial clearance head bore / post
+    clip_t=1.5, clip_groove_d=10.6, clip_play=0.3, clip_od=18.0,
 
     # ---- pan head (yoke plate) ----
-    head_t=4.5, groove_depth=2.5, groove_clear=1.0,  # radial clearance ring/groove
-    hub_d=16.0, hub_h=3.0,
-    tilt_z=38.0,                     # tilt axis above head plate top
-    wall_t=3.0, wall_w=28.0, wall_h=50.0, wall_x=-49.5,   # wall_x = wall OUTER face (tilt servo ear TOP lands here)
-    col_x0=43.0, col_x1=50.0, col_y_back=16.0, col_y_front=-6.0, col_top=44.0,
+    head_t=4.5,
+    hub_od=22.0, hub_h=8.0,          # bushing tube above the plate
+    tilt_z=45.0,                     # tilt axis above head plate top
+    wall_t=3.0, wall_w=28.0, wall_h=57.0, wall_x=-49.5,   # wall_x = wall OUTER face (tilt servo ear TOP lands here)
+    col_x0=43.0, col_x1=50.0, col_y_back=16.0, col_y_front=-6.0, col_top=51.0,
     col_slope_h=10.0,                # 45 deg lean-forward below the pin hole
     pin_d=4.8, pin_hole_col=4.9, pin_hole_pod=5.2, pin_head_d=8.0, pin_head_t=2.5,
+    pan_srv_x=0.0, pan_srv_y=30.0,   # pan servo SHAFT position on the head (= centre distance 30, on a base-gear tooth line)
+    pinion_phase=4.5,                # pinion rotated half a tooth so a gap faces the base gear's tooth at pan 0
+    pinion_t=7.0, pinion_top_gap=0.5,  # pinion top face below the plate underside
+    pan_pad_h=2.0,                   # raised pad under the pan servo ears (keeps 8 mm ear screws inside the plate)
+    pinion_screw_groove=1.8,         # clearance grooves in the pinion top under the ear-screw tips
     radar_cx=54.0, radar_cy=-32.0, radar_yaw=45.0,
     # LD2410C holder
     rad_L=22.0, rad_H=16.0, rad_pcb_t=1.6, rad_groove_w=2.0, rad_groove_eng=1.2,
     rad_rail_w=4.0, rad_rail_t=5.0, rad_ledge_h=3.0, rad_rail_h=20.0,
     rad_pin_edge=1.7,                # pin row from header edge
-    head_main=(-58.0, 53.0, -34.0, 32.0),   # x0,x1,y0,y1 of main plate
+    head_main=(-58.0, 53.0, -34.0, 53.0),   # x0,x1,y0,y1 of main plate
     wing=30.0,
 
     # ---- camera pod ----
@@ -79,6 +92,7 @@ P = dict(
     usb_y0=-15.5, usb_y1=-7.5, usb_z=12.5,
     boss_l_r=9.0, boss_l_h=5.0, boss_r_r=5.0, boss_r_h=3.0,
     post_d=5.0, post_x=28.0, post_z=12.0, post_mod_d=3.5, post_mod_x=-31.8,
+    cover_slot_w=14.0, cover_slot_h=3.6,   # wire slots through the cover's back face (5-pin Dupont passes)
 
     # ---- ESP32-S3-CAM board (68 x 29 incl. module overhang) ----
     pcb_L=63.7, pcb_W=29.0, pcb_t=1.6, mod_L=25.5, mod_W=18.0, mod_h=3.2, mod_overhang=4.3,
@@ -111,11 +125,20 @@ def rrect_prism(x0, x1, y0, y1, z0, z1, r):
     cs = rrect(x1 - x0, y1 - y0, r).translate([(x0 + x1) / 2, (y0 + y1) / 2])
     return cs.extrude(z1 - z0).translate([0, 0, z0])
 
+def poly(pts):
+    """CrossSection from a single polygon, forced counter-clockwise (positive area)."""
+    a = 0.0
+    for i in range(len(pts)):
+        x0, y0 = pts[i]; x1, y1 = pts[(i + 1) % len(pts)]
+        a += x0 * y1 - x1 * y0
+    if a < 0:
+        pts = list(reversed(pts))
+    return CrossSection([pts])
+
 def teardrop_cs(r, seg=SEG_SMALL):
     """circle of radius r with a 45deg point towards +Y (printable overhang)."""
     pts = []
     n = seg
-    # arc from 135deg around through 270deg to 45deg (long way)
     a0, a1 = math.radians(135), math.radians(405)
     for i in range(n + 1):
         a = a0 + (a1 - a0) * i / n
@@ -127,8 +150,7 @@ def teardrop_x(r, x0, x1, y=0.0, z=0.0, point="-y", seg=SEG_SMALL):
     """prism along +X between x0..x1 with a teardrop section in the Y-Z plane.
     point: direction of the 45deg apex: '-y', '+y', '+z', '-z'."""
     m = teardrop_cs(r, seg).extrude(x1 - x0)          # along +Z, apex +Y
-    # rotate extrusion axis Z -> X ; after rotate([0,90,0]): (x,y,z)->(z, y, -x)
-    m = m.rotate([0, 90, 0])                           # apex now along +Y, axis +X
+    m = m.rotate([0, 90, 0])                           # axis -> +X, apex still +Y
     if point == "+y":
         pass
     elif point == "-y":
@@ -152,20 +174,10 @@ def slot_x(w, length, x0, x1, y=0.0, z=0.0, along="z", seg=24):
     r = w / 2
     cs = CrossSection.square([max(length - w, 0.001), w], True).offset(r, JoinType.Round, 2.0, seg)
     m = cs.extrude(x1 - x0)                 # along Z, elongated along X
-    m = m.rotate([0, 90, 0])                # axis -> X ; elongation now along -Z
+    m = m.rotate([0, 90, 0])                # axis -> X ; elongation now along Z
     if along == "y":
         m = m.rotate([90, 0, 0])
     return m.translate([x0, y, z])
-
-def poly(pts):
-    """CrossSection from a single polygon, forced counter-clockwise (positive area)."""
-    a = 0.0
-    for i in range(len(pts)):
-        x0, y0 = pts[i]; x1, y1 = pts[(i + 1) % len(pts)]
-        a += x0 * y1 - x1 * y0
-    if a < 0:
-        pts = list(reversed(pts))
-    return CrossSection([pts])
 
 def union(*ms):
     out = ms[0]
@@ -181,10 +193,50 @@ def to_trimesh(m):
     return trimesh.Trimesh(v, f, process=False)
 
 # --------------------------------------------------------------------------
+# involute spur gear (external), 20 deg pressure angle
+# --------------------------------------------------------------------------
+def involute_gear_cs(m, N, pa_deg=20.0, backlash=0.0, flank_pts=10, addendum=1.0, dedendum=1.25):
+    """CrossSection of an external involute gear centred at the origin, tooth centred on +X."""
+    pa = math.radians(pa_deg)
+    rp = m * N / 2.0
+    rb = rp * math.cos(pa)
+    ra = rp + addendum * m
+    rf = rp - dedendum * m
+    inv = lambda a: math.tan(a) - a
+    psi_p = math.pi / (2 * N) - backlash / (2 * rp)          # half tooth angle at pitch circle
+    def flank_angle(r):
+        a_r = math.acos(min(1.0, rb / r))
+        return psi_p + inv(pa) - inv(a_r)
+    tooth = []
+    r_start = max(rf, rb)
+    # right flank (negative angles), root -> tip
+    rs = [r_start + (ra - r_start) * i / flank_pts for i in range(flank_pts + 1)]
+    right = [(r, -flank_angle(r)) for r in rs]
+    left = [(r, flank_angle(r)) for r in reversed(rs)]
+    pts_polar = []
+    if rf < rb:
+        pts_polar.append((rf, -flank_angle(rb)))
+    pts_polar += right + left
+    if rf < rb:
+        pts_polar.append((rf, flank_angle(rb)))
+    pts = []
+    pitch = 2 * math.pi / N
+    for k in range(N):
+        rot = k * pitch
+        for (r, th) in pts_polar:
+            pts.append([r * math.cos(th + rot), r * math.sin(th + rot)])
+        # root arc point between teeth
+        pts.append([rf * math.cos(rot + pitch / 2), rf * math.sin(rot + pitch / 2)])
+    return poly(pts), dict(rp=rp, ra=ra, rf=rf, rb=rb)
+
+def gear_centre_distance():
+    return P["gear_m"] * (P["gear_base_T"] + P["gear_pin_T"]) / 2.0
+
+# --------------------------------------------------------------------------
 # Ghost components (for clearance checks and renders) - NOT printed
 # --------------------------------------------------------------------------
 def servo_ghost(spline_r=None):
-    """MG90S in its local frame: shaft axis = +Z, ear seat (underside of ears) at z=0,
+    """MG90S in its local frame: shaft axis = +Z, ear UNDERSIDE at z=0 (ears z 0..2.5),
     case length along X with the shaft srv_shaft_off from the -X end face.
     Returns (body_parts_manifold, spline_manifold, lead_exit_marker)."""
     L, W = P["srv_L"], P["srv_W"]
@@ -231,7 +283,6 @@ def esp32cam_ghost():
     y_pcb_bot = y_pcb_top + t
     pcb = box(x_pcb0, x_pcb1, y_pcb_top, y_pcb_bot, -W / 2, W / 2)
     module = box(x_mod_end, x_mod_end + P["mod_L"], y_mod_top, y_pcb_top, -P["mod_W"] / 2, P["mod_W"] / 2)
-    # headers (plastic + pins) on the back along both long edges
     he = P["hdr_edge"]
     hz0 = x_pcb0 + P["hdr_z0"]; hz1 = x_pcb0 + P["hdr_z1"]
     hdr = union(
@@ -240,48 +291,29 @@ def esp32cam_ghost():
     pins = union(
         box(hz0, hz1, y_pcb_bot + P["hdr_t"], y_pcb_bot + P["hdr_t"] + P["pin_len"], W / 2 - he - 0.4, W / 2 - he + 0.4),
         box(hz0, hz1, y_pcb_bot + P["hdr_t"], y_pcb_bot + P["hdr_t"] + P["pin_len"], -W / 2 + he - 0.4, -W / 2 + he + 0.4))
-    # dupont housings zone on the pins (worst case: whole rows populated)
     hous = union(
         box(hz0, hz1, y_pcb_bot + P["hdr_t"], y_pcb_bot + P["hdr_t"] + 14.0, W / 2 - he - 1.27, W / 2 - he + 1.27),
         box(hz0, hz1, y_pcb_bot + P["hdr_t"], y_pcb_bot + P["hdr_t"] + 14.0, -W / 2 + he - 1.27, -W / 2 + he + 1.27))
-    # solder bumps on the component side at the pins
     bumps = union(
         box(hz0, hz1, y_pcb_top - 1.2, y_pcb_top, W / 2 - he - 1.0, W / 2 - he + 1.0),
         box(hz0, hz1, y_pcb_top - 1.2, y_pcb_top, -W / 2 + he - 1.0, -W / 2 + he + 1.0))
-    # USB-C receptacles at +X end, on component side, and plug zones beyond the edge
     yc = y_pcb_top - P["usb_h"] / 2
     usb = union(*[box(x_pcb1 - P["usb_depth"], x_pcb1 + 0.5, y_pcb_top - P["usb_h"], y_pcb_top, zc - P["usb_w"] / 2, zc + P["usb_w"] / 2)
                   for zc in (-P["usb_cc"] / 2, P["usb_cc"] / 2)])
     plugs = union(*[box(x_pcb1 + 0.5, x_pcb1 + P["plug_len"], yc - P["plug_h"] / 2, yc + P["plug_h"] / 2, zc - P["plug_w"] / 2, zc + P["plug_w"] / 2)
                     for zc in (-P["usb_cc"] / 2, P["usb_cc"] / 2)])
-    # camera head sitting on the module can, lens barrel through the front wall
     xl = x_mod_end + P["lens_from_mod_end"]
     cb = P["cam_base"] / 2
     cam_base = box(xl - cb, xl + cb, y_mod_top - P["cam_base_t"], y_mod_top, -cb, cb)
     barrel = cyl_y(P["cam_barrel_d"] / 2, y_mod_top - P["cam_base_t"] - P["cam_barrel_h"], y_mod_top - P["cam_base_t"] + 0.01, xl, 0, seg=SEG_SMALL)
-    # misc parts on component side (buttons, LEDs, FPC connector) ~ 4 mm tall over the PCB middle
     parts = box(x_pcb0 + 6, x_pcb1 - 9, y_pcb_top - 4.0, y_pcb_top, -W / 2 + 4, W / 2 - 4)
     return dict(pcb=pcb, module=module, hdr=hdr, pins=pins, housings=hous, bumps=bumps, usb=usb, plugs=plugs,
                 cam=union(cam_base, barrel), parts=parts,
                 lens_x=xl, y_pcb_top=y_pcb_top, y_pcb_bot=y_pcb_bot, y_mod_top=y_mod_top, x_pcb1=x_pcb1, x_mod_end=x_mod_end)
 
 # --------------------------------------------------------------------------
-# PART 1: base plate + pan turret   (print: plate down)
+# PART 1: base plate + fixed hollow post with the 20T gear   (print: plate down)
 # --------------------------------------------------------------------------
-def servo_pocket_cut(seat_z, lead=True):
-    """Cuts for a servo dropped in from +Z with its ear seat at z=seat_z, shaft on the Z axis,
-    case along +X (shaft srv_shaft_off from the -X end)."""
-    L, W = P["pocket_L"], P["pocket_W"]
-    x0 = -P["srv_shaft_off"] - (L - P["srv_L"]) / 2
-    x1 = x0 + L
-    zb = seat_z - P["pocket_depth"]
-    cut = box(x0, x1, -W / 2, W / 2, zb, seat_z + 30)
-    xc = (x0 + x1) / 2
-    for sx in (-1, 1):
-        cx = xc + sx * P["srv_hole_cc"] / 2
-        cut += slot_z(P["pilot_w"], P["pilot_len"], seat_z - P["pilot_depth"], seat_z + 30, cx, 0, along="x")
-    return cut, x0, x1, zb
-
 def part_base():
     bx, by, bt = P["base_x"], P["base_y"], P["base_t"]
     plate = rrect_prism(-bx / 2, bx / 2, -by / 2, by / 2, -bt, 0, 6.0)
@@ -291,30 +323,36 @@ def part_base():
             x, y = sx * (bx / 2 - ins), sy * (by / 2 - ins)
             plate -= cyl_z(P["base_hole_d"] / 2, -bt - 1, 1, x, y, SEG_SMALL)
             plate -= cyl_z(P["base_cb_d"] / 2, -P["base_cb_depth"], 1, x, y, SEG_SMALL)
-    seat = P["seat_z"]
-    top = seat + P["ring_top"]
-    turret = cyl_z(P["turret_od"] / 2, -0.01, top)
-    foot = Manifold.cylinder(P["turret_foot_h"], P["turret_foot_od"] / 2, P["turret_od"] / 2, SEG).translate([0, 0, -0.01])
-    body = plate + turret + foot
-    # counterbore above the seat (ring interior)
-    body -= cyl_z(P["ring_id"] / 2, seat, top + 1)
-    # servo pocket + pilot slots
-    cut, px0, px1, pzb = servo_pocket_cut(seat)
-    body -= cut
-    # lead cavity at shaft end (bottom part of end wall cut back 3 mm, full width + offset part)
-    lw = P["lead_w"]
-    body -= box(px0 - 3.0, px0 + 0.01, -P["pocket_W"] / 2, 2.5 + lw, pzb, pzb + 10.0)
-    # lead slot up to the seat (offset so the pilot slot at y=0 keeps solid material)
-    body -= box(px0 - 3.0, px0 + 0.01, 2.5, 2.5 + lw, pzb, top + 1)
-    # tunnel out to the side at plate level
-    body -= box(-P["turret_foot_od"] / 2 - 1, px0 - 3.0 + 0.01, 2.5, 2.5 + lw, pzb, pzb + P["lead_h"])
-    # drain hole through plate under the pocket
-    body -= cyl_z(P["drain_d"] / 2, -bt - 1, pzb + 1, (px0 + px1) / 2, 0, SEG_SMALL)
+    zu = P["head_under"]
+    z_collar0 = zu - P["collar_h"]
+    z_gear0 = z_collar0 - P["gear_h"]
+    z_top = zu + P["head_t"] + P["post_top_above"]
+    # plain post up to the top
+    post = cyl_z(P["post_od"] / 2, -0.01, z_top, seg=SEG)
+    # fixed gear + smooth collar
+    gcs, gi = involute_gear_cs(P["gear_m"], P["gear_base_T"], P["gear_pa"], P["gear_backlash"])
+    gear = gcs.extrude(P["gear_h"]).translate([0, 0, z_gear0])
+    collar = cyl_z(P["collar_d"] / 2, z_collar0 - 0.01, zu, seg=SEG)
+    # cone foot: from foot_d at the plate to the gear root diameter just under the gear
+    foot = Manifold.cylinder(P["foot_h"] + 0.01, P["foot_d"] / 2, gi["ra"], SEG).translate([0, 0, -0.01])
+    body = plate + post + gear + collar + foot
+    # hollow bore all the way, open at the top
+    body -= cyl_z(P["post_bore"] / 2, -bt - 1, z_top + 1, seg=SEG_SMALL)
+    # side slot at the top of the post (wires leave sideways, towards +Y = back), above the C-clip
+    zs0 = zu + P["head_t"] + P["hub_h"] + P["clip_t"] + P["clip_play"] + 0.8
+    body -= box(-4.5, 4.5, 0, P["post_od"] / 2 + 1, zs0, z_top + 1)
+    # C-clip groove just above the hub
+    zc0 = zu + P["head_t"] + P["hub_h"] + P["clip_play"]
+    body -= (cyl_z(P["post_od"] / 2 + 1, zc0, zc0 + P["clip_t"] + 0.2, seg=SEG) - cyl_z(P["clip_groove_d"] / 2, zc0 - 1, zc0 + P["clip_t"] + 1, seg=SEG))
+    # cable entry: notch through the foot/post wall at plate level on the -Y side, into the bore
+    body -= box(-P["cable_slot_w"] / 2, P["cable_slot_w"] / 2, -P["foot_d"] / 2 - 1, 0, -bt + 1.5, P["cable_slot_h"])
+    # and a hole straight down through the plate under the bore (for an under-plate feed)
+    body -= cyl_z(P["post_bore"] / 2, -bt - 1, 1, seg=SEG_SMALL)
     return body
 
 # --------------------------------------------------------------------------
-# PART 2: pan head (yoke plate + hub + servo wall + pin column + radar holders)  (print: plate down)
-# head-local frame: plate top at z=0, pan axis = Z axis, tilt axis = line (y=0, z=tilt_z) along X
+# PART 2: pan head (yoke plate + hub bushing + pan servo pocket + tilt wall + pin column + radar holders)
+# head-local frame: z = 0 is the PLATE TOP; plate occupies z in [-head_t, 0]
 # --------------------------------------------------------------------------
 def radar_holder_local():
     """holder standing on z=0 in holder-local frame (see radar_ghost)."""
@@ -330,7 +368,6 @@ def radar_holder_local():
         m = rail if m is None else m + rail
     ledge = box(-inner - 0.01, inner + 0.01, -rt / 2, 0.6, 0, P["rad_ledge_h"])
     m += ledge
-    # small fillet/foot flare for strength: 45deg wedge along the rails' outer faces
     return m
 
 def head_plate_outline():
@@ -342,41 +379,46 @@ def head_plate_outline():
     return main + wl + wr
 
 def column_profile_yz():
-    """shark-fin column cross-section in (y,z): vertical back, front face vertical at y_front
-    down to z_top - slope... ; actually front leans forward 45deg below the pin hole."""
+    """shark-fin column cross-section in (y,z): leans forward 45deg below the pin hole."""
     yf, yb, zt = P["col_y_front"], P["col_y_back"], P["col_top"]
     tz = P["tilt_z"]; sh = P["col_slope_h"]
-    # polygon in (y,z): start bottom-back, go bottom-front, up the front
     pts = [[yb, -0.5], [yf + sh, -0.5], [yf + sh, tz - sh], [yf, tz], [yf, zt], [yb, zt]]
     return poly(pts)
 
+def pan_servo_window_cut():
+    """cut for the pan servo dropped into the head plate from above, shaft DOWN, case along X,
+    shaft at (pan_srv_x, pan_srv_y).  Includes the pilot slots (through the plate + bosses)."""
+    L, W = P["pocket_L"], P["pocket_W"]
+    sx, sy = P["pan_srv_x"], P["pan_srv_y"]
+    x0 = sx - P["srv_shaft_off"] - (L - P["srv_L"]) / 2
+    x1 = x0 + L
+    cut = box(x0, x1, sy - W / 2, sy + W / 2, -P["head_t"] - 1, 30)
+    xc = (x0 + x1) / 2
+    for s in (-1, 1):
+        cut += slot_z(P["pilot_w"], P["pilot_len"], -P["head_t"] - 1, 30, xc + s * P["srv_hole_cc"] / 2, sy, along="x")
+    return cut, xc
+
 def part_head(with_holders=True):
-    """head-local frame: z = 0 is the PLATE TOP; plate occupies z in [-head_t, 0]; underside features
-    (ring groove, spline socket) are cut from z = -head_t upward."""
     t = P["head_t"]
     plate = head_plate_outline().extrude(t).translate([0, 0, -t])
-    # underside groove for the turret ring (ring: ID ring_id, OD turret_od)
-    c = P["groove_clear"]
-    g_id = P["ring_id"] - 2 * c; g_od = P["turret_od"] + 2 * c
-    groove = cyl_z(g_od / 2, -t - 1, -t + P["groove_depth"]) - cyl_z(g_id / 2, -t - 2, -t + P["groove_depth"] + 1)
-    plate -= groove
-    # hub boss on top with the spline socket from below
-    hub = cyl_z(P["hub_d"] / 2, -0.01, P["hub_h"], seg=SEG_SMALL)
+    # hub bushing tube above the plate + bore through everything
+    hub = cyl_z(P["hub_od"] / 2, -0.01, P["hub_h"], seg=SEG)
     head = plate + hub
-    head -= cyl_z(P["socket_d"] / 2, -t - 1, -t + P["socket_depth"], seg=SEG_SMALL)          # socket (from underside)
-    head -= cyl_z(P["socket_cb_d"] / 2, -t - 1, -t + P["socket_cb_depth"], seg=SEG_SMALL)    # dome clearance
-    head -= cyl_z(P["screw_d"] / 2, -t + P["socket_depth"] - 0.5, P["hub_h"] + 1, seg=SEG_SMALL)
+    # raised pad under the pan servo ears, then the window + pilot slots through pad and plate
+    cut, xc = pan_servo_window_cut()
+    head += rrect_prism(xc - P["srv_ear_span"] / 2 - 1.0, xc + P["srv_ear_span"] / 2 + 1.0,
+                        P["pan_srv_y"] - P["srv_W"] / 2 - 1.0, P["pan_srv_y"] + P["srv_W"] / 2 + 1.0, -0.01, P["pan_pad_h"], 2.0)
+    head -= cut
+    head -= cyl_z(P["post_od"] / 2 + P["bush_clear"], -t - 1, P["hub_h"] + 1, seg=SEG)
     # ---- tilt servo wall (ears on OUTER face at x = wall_x) ----
     wx = P["wall_x"]; wt = P["wall_t"]; ww = P["wall_w"]; wh = P["wall_h"]; tz = P["tilt_z"]
     wall = box(wx, wx + wt, -ww / 2, ww / 2, -t + 0.5, wh)
-    # window for the servo case (shaft end UP): case from tz - (srv_L - shaft_off) to tz + shaft_off
     zc0 = tz - (P["srv_L"] - P["srv_shaft_off"]) - (P["pocket_L"] - P["srv_L"]) / 2
     zc1 = zc0 + P["pocket_L"]
     wall -= box(wx - 1, wx + wt + 1, -P["pocket_W"] / 2, P["pocket_W"] / 2, zc0, zc1)
     zcen = (zc0 + zc1) / 2
     for s in (-1, 1):
         wall -= slot_x(P["pilot_w"], P["pilot_len"], wx - 1, wx + wt + 1, 0, zcen + s * P["srv_hole_cc"] / 2, along="z")
-    # gussets: outboard (beside the servo, at the wall's y ends) and inboard (low, under the pod swing)
     gt = 2.5
     for s in (-1, 1):
         yg0 = s * (ww / 2) - (gt if s > 0 else 0)
@@ -388,7 +430,6 @@ def part_head(with_holders=True):
     # ---- pin column (right) ----
     col = column_profile_yz().extrude(P["col_x1"] - P["col_x0"]).rotate([90, 0, 90]).translate([P["col_x0"], 0, 0])
     col -= teardrop_x(P["pin_hole_col"] / 2, P["col_x0"] - 1, P["col_x1"] + 1, 0, tz, point="+z")
-    # rear gusset behind the column
     cg = poly([[P["col_y_back"], -0.5], [P["col_y_back"] + 10.0, -0.5], [P["col_y_back"], 30.0]]).extrude(P["col_x1"] - P["col_x0"]).rotate([90, 0, 90]).translate([P["col_x0"], 0, 0])
     head += col + cg
     # ---- radar holders at the front corners, yawed +/-45 ----
@@ -403,7 +444,41 @@ def radar_transform(side):
     return (-P["radar_yaw"] if side < 0 else P["radar_yaw"], (side * P["radar_cx"], P["radar_cy"]))
 
 # --------------------------------------------------------------------------
-# PART 3: camera pod   (print: front face down)
+# PART 3: pinion (40T) on the pan servo spline   (print: screw side down)
+# pinion-local: z=0 bottom face (screw head side), top face at pinion_t with the spline socket
+# --------------------------------------------------------------------------
+def part_pinion():
+    tcs, gi = involute_gear_cs(P["gear_m"], P["gear_pin_T"], P["gear_pa"], P["gear_backlash"])
+    h = P["pinion_t"]
+    g = tcs.extrude(h)
+    # spline socket from the top (the dome stays inside the plate window above the pinion)
+    g -= cyl_z(P["socket_d"] / 2, h - 4.0, h + 1, seg=SEG_SMALL)
+    # clearance grooves where the ear-screw tips would sweep if the kit screws are longer than 8 mm
+    for rr in (abs(P["srv_hole_cc"] / 2 - (P["srv_L"] / 2 - P["srv_shaft_off"])), P["srv_hole_cc"] / 2 + (P["srv_L"] / 2 - P["srv_shaft_off"])):
+        g -= cyl_z(rr + 1.4, h - P["pinion_screw_groove"], h + 1, seg=SEG) - cyl_z(rr - 1.4, h - P["pinion_screw_groove"] - 1, h + 2, seg=SEG)
+    # centre screw hole + head recess from the bottom
+    g -= cyl_z(P["screw_d"] / 2, -1, h, seg=SEG_SMALL)
+    g -= cyl_z(2.6, -1, 1.5, seg=SEG_SMALL)
+    # lightening: 6 holes
+    for k in range(6):
+        a = math.radians(60 * k + 30)
+        g -= cyl_z(4.0, -1, h + 1, 13.5 * math.cos(a), 13.5 * math.sin(a), seg=SEG_SMALL)
+    return g, gi
+
+# --------------------------------------------------------------------------
+# PART 4: C-clip for the post (print flat)
+# --------------------------------------------------------------------------
+def part_clip():
+    t = P["clip_t"]
+    ring = cyl_z(P["clip_od"] / 2, 0, t, seg=SEG) - cyl_z(P["clip_groove_d"] / 2 + 0.05, -1, t + 1, seg=SEG)
+    # opening: remove a 130 deg sector (chord 9.6 mm < 10.6 groove) so it snaps on sideways
+    ang = 65.0
+    opening = poly([[0, 0], [30 * math.cos(math.radians(-90 - ang)), 30 * math.sin(math.radians(-90 - ang))],
+                    [0, -40], [30 * math.cos(math.radians(-90 + ang)), 30 * math.sin(math.radians(-90 + ang))]]).extrude(t + 2).translate([0, 0, -1])
+    return ring - opening
+
+# --------------------------------------------------------------------------
+# PART 5: camera pod   (print: front face down)
 # pod-local frame: centre of the box at origin; front wall at -Y; tilt axis = line (y=axis_y, z=0) along X
 # --------------------------------------------------------------------------
 def part_pod():
@@ -411,40 +486,30 @@ def part_pod():
     w = P["pod_wall"]; fw = P["pod_front"]
     cx, cz = P["cav_x"], P["cav_z"]
     ay = P["axis_y"]
-    # outline rounded in X-Z (so the rounded edges stand vertical when printed front-face-down)
     outer = rrect(L, H, 3.0).extrude(D - P["cover_t"]).rotate([-90, 0, 0]).translate([0, -D / 2, 0])
     y_in = -D / 2 + fw
     cav = box(-cx, cx, y_in, D / 2 + 1, -cz, cz)
     pod = outer - cav
     g = esp32cam_ghost()
-    # lens hole + camera recess on the inner face of the front wall
     xl = g["lens_x"]
     pod -= cyl_y(P["lens_hole_d"] / 2, -D / 2 - 1, y_in + 1, xl, 0, seg=SEG_SMALL)
     r = P["cam_recess"] / 2
     pod -= box(xl - r, xl + r, y_in - P["cam_recess_depth"], y_in + 1, -r, r)
-    # USB-C opening in the +X end wall
     pod -= box(cx - 1, L / 2 + 1, P["usb_y0"], P["usb_y1"], -P["usb_z"], P["usb_z"])
-    # cover rabbet: nothing (cover lip goes inside cavity); snap grooves in top/bottom cavity walls
     yg0, yg1 = D / 2 - P["cover_t"] - P["lip_h"], D / 2 - P["cover_t"] - P["lip_h"] + 1.8
     for sx in (-1, 1):
         for sz in (-1, 1):
             pod -= box(min(sx * 9.0, sx * 21.0), max(sx * 9.0, sx * 21.0), yg0, yg1,
                        min(sz * (cz - 0.01), sz * (cz + 0.6)), max(sz * (cz - 0.01), sz * (cz + 0.6)))
-    # finger notches at the +/-X ends of the rim so the cover can be pried
     for sx in (-1, 1):
         pod -= box(min(sx * (cx - 0.5), sx * (L / 2 + 1)), max(sx * (cx - 0.5), sx * (L / 2 + 1)), D / 2 - P["cover_t"] - 1.5, D / 2 + 1, -4, 4)
-    # (rim ends at y = D/2 - cover_t; the cover plate sits on it and closes flush with the box outline)
-    # ---- left end: spline socket boss (teardrop, apex towards -Y = down in the print) ----
     bl = P["boss_l_h"]
-    boss_l = teardrop_x(P["boss_l_r"], -L / 2 - bl, -L / 2 + 0.01, ay, 0, point="-y")
-    pod += boss_l
+    pod += teardrop_x(P["boss_l_r"], -L / 2 - bl, -L / 2 + 0.01, ay, 0, point="-y")
     pod -= teardrop_x(P["socket_d"] / 2, -L / 2 - bl - 1, -L / 2 - bl + P["socket_depth"], ay, 0, point="+y")
-    pod -= teardrop_x(P["socket_cb_d"] / 2, -L / 2 - bl - 1, -L / 2 - bl + P["socket_cb_depth"], ay, 0, point="+y")
+    pod -= cyl_x(P["socket_cb_d"] / 2, -L / 2 - bl - 1, -L / 2 - bl + P["socket_cb_depth"], ay, 0, SEG_SMALL)
     pod -= cyl_x(P["screw_d"] / 2, -L / 2 - bl - 1, -cx + 1, ay, 0, SEG_SMALL)
-    # ---- right end: pivot boss with pin hole ----
     br = P["boss_r_h"]
-    boss_r = teardrop_x(P["boss_r_r"], L / 2 - 0.01, L / 2 + br, ay, 0, point="-y")
-    pod += boss_r
+    pod += teardrop_x(P["boss_r_r"], L / 2 - 0.01, L / 2 + br, ay, 0, point="-y")
     pod -= teardrop_x(P["pin_hole_pod"] / 2, cx - 1, L / 2 + br + 1, ay, 0, point="+y")
     return pod
 
@@ -454,28 +519,26 @@ def part_cover():
     ct, lt, lh, lc = P["cover_t"], P["lip_t"], P["lip_h"], P["lip_clear"]
     y1 = D / 2; y0 = y1 - ct
     plate = rrect(L, H, 3.0).extrude(ct).rotate([-90, 0, 0]).translate([0, y0, 0])
-    # lip ring inside the cavity opening
     ox, oz = cx - lc, cz - lc
     lip = box(-ox, ox, y0 - lh, y0 + 0.01, -oz, oz) - box(-ox + lt, ox - lt, y0 - lh - 1, y0 + 1, -oz + lt, oz - lt)
-    # free the snap tabs: slits in the lip at x = +/-8.5 and +/-21.5 on top & bottom edges
     for sx in (-1, 1):
         for xs in (8.5, 21.5):
             lip -= box(sx * xs - 0.5, sx * xs + 0.5, y0 - lh - 1, y0 - 0.3, -oz - 1, -oz + lt + 0.5)
             lip -= box(sx * xs - 0.5, sx * xs + 0.5, y0 - lh - 1, y0 - 0.3, oz - lt - 0.5, oz + 1)
     cover = plate + lip
-    # snap bumps on the tabs (0.5 proud, with 45deg lead-in towards the insertion direction -Y)
     for sx in (-1, 1):
         for sz in (-1, 1):
             xa, xb = min(sx * 10.0, sx * 20.0), max(sx * 10.0, sx * 20.0)
             zb = sz * oz
-            # bump = hull of a thin strip at the lip face and a 0.5 mm proud strip (gives a 45deg lead-in)
             b1 = box(xa, xb, y0 - lh + 0.4, y0 - lh + 1.6, min(zb, zb + sz * 0.5), max(zb, zb + sz * 0.5))
             b2 = box(xa, xb, y0 - lh - 0.1, y0 - lh + 1.6, min(zb, zb + sz * 0.05), max(zb, zb + sz * 0.05))
             cover += Manifold.batch_hull([b1, b2])
-    # wire notches: bottom centre and both lower corners
-    cover -= box(-8.0, 8.0, y0 - lh - 1, y1 + 1, -H / 2 - 1, -cz + 2.0)
-    for sx in (-1, 1):
-        cover -= box(min(sx * 30.0, sx * (L / 2 + 1)), max(sx * 30.0, sx * (L / 2 + 1)), y0 - lh - 1, y1 + 1, -H / 2 - 1, -cz + 3.0)
+    # wire slots THROUGH the back face (leads leave backwards, away from the swing): three slots in the
+    # lower half, between the retention posts; a 5-pin Dupont housing (12.7 x 2.6) passes flat.
+    sw, sh = P["cover_slot_w"], P["cover_slot_h"]
+    for xcn in (-22.0, 0.0, 22.0):
+        cover -= slot_z(sh, sw, y0 - lh - 1, y1 + 1, xcn, 0, along="x").rotate([90, 0, 0]).translate([0, 0, 0]) if False else \
+                 rrect(sw, sh, sh / 2 - 0.01).translate([xcn, -7.0]).extrude(ct + lh + 2).rotate([-90, 0, 0]).translate([0, y0 - lh - 1, 0])
     # board retention posts
     g = esp32cam_ghost()
     for sz in (-1, 1):
@@ -497,14 +560,26 @@ def part_pin():
 # --------------------------------------------------------------------------
 def head_z():
     """world Z of the head plate TOP (head-local z = 0)"""
-    return P["seat_z"] + P["seat_to_face"] + P["head_t"]
+    return P["head_under"] + P["head_t"]
 
 def pod_in_head(tilt_deg=0.0):
     """pod-local -> head-local transform applied to a manifold"""
     def f(m):
-        # move tilt axis (y=axis_y,z=0) to origin, rotate about X, then to (0, 0, tilt_z)
         return m.translate([0, -P["axis_y"], 0]).rotate([tilt_deg, 0, 0]).translate([0, 0, P["tilt_z"]])
     return f
+
+def pinion_in_head():
+    """pinion-local (bottom face z=0) -> head-local: hangs under the plate on the pan servo spline"""
+    ztop = -P["head_t"] - P["pinion_top_gap"]
+    return lambda m: m.translate([P["pan_srv_x"], P["pan_srv_y"], ztop - P["pinion_t"]])
+
+def pan_servo_in_head():
+    """servo-local (ear underside z=0, shaft +Z) -> head-local: shaft DOWN, ear TOP on the plate top"""
+    return lambda m: m.rotate([180, 0, 0]).translate([P["pan_srv_x"], P["pan_srv_y"], P["srv_ear_t"] + P["pan_pad_h"]])
+
+def clip_in_head():
+    """clip-local (z=0 bottom) -> head-local: sits in the post groove just above the hub"""
+    return lambda m: m.translate([0, 0, P["hub_h"] + P["clip_play"]])
 
 if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
@@ -516,8 +591,12 @@ if __name__ == "__main__":
     parts["cover"] = part_cover()
     pin, shank_len = part_pin()
     parts["pin"] = pin
+    pinion, gi = part_pinion()
+    parts["pinion"] = pinion
+    parts["clip"] = part_clip()
     for k, m in parts.items():
         tm = to_trimesh(m)
         print(f"{k:6s} status={m.status()} tris={m.num_tri():6d} vol={m.volume():9.0f} mm3  bbox={np.round(tm.bounds,1).tolist()} watertight={tm.is_watertight}")
         tm.export(os.path.join(OUT, f"{k}.stl"))
-    print("pin shank length", shank_len)
+    print("pin shank length", shank_len, " pinion rp/ra/rf", gi, " centre distance", gear_centre_distance(),
+          " servo radius", math.hypot(P["pan_srv_x"], P["pan_srv_y"]))
