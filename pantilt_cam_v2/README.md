@@ -43,6 +43,18 @@ touches another in the assembled position; the pinion meshes with the sun at eve
 tilt angle from −90° to +90°; a USB-C plug passes the post bore; everything is inside the 180 × 180
 bed.
 
+
+## Fit check against the user's board model
+
+`out/fig14_meshy_board_fit.png`: the Meshy-generated ESP32 camera board model, scaled to the real
+68 × 27.6 mm footprint and placed in the pod where the board goes (component side to the front wall,
+USB end at the end-wall opening). PCB body, header pins and ports clear the pod and cover. The only
+contacts are artefacts of the AI model: its camera column sits mid-board (the real OV3660 sits on the
+module end, over the Ø9 lens hole), its PCB has no mounting holes (the pegs pass through solid
+plastic) and its header rows run 8 mm longer than the real board's (they graze a cover post).
+
+![meshy fit](out/fig14_meshy_board_fit.png)
+
 ## Why these gears
 
 - **Module 1.5, 28 teeth each**, 20° involute, standard full-depth tooth (addendum 1.5, dedendum
