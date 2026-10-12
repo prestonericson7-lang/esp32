@@ -63,11 +63,25 @@ const char* MDNS_HOST = "homecam";   // -> http://homecam.local   (change if you
                                            it sits dead still (servo trim).      */
 #define PAN_STOP_US       1500    // neutral / STOP pulse (trim here if it creeps)
 #define PAN_JOG_US        180     // manual jog speed: offset from stop (bigger = faster)
-#define PAN_SWEEP_US      130     // guard-mode sweep speed (gentler)
+#define PAN_SWEEP_US      130     // guard-mode step speed (gentler)
 #define PAN_CMD_MS        300     // a jog keeps pan moving this long; button release => stop
-#define GUARD_LEG_MS      2000    // guard: spin each way this long before reversing
-#define GUARD_TRACK_MS    700     // guard: drive toward a radar hit this long
-#define GUARD_WATCH_MS    3000    // guard: then stop & watch this long
+
+/* Boot-zero dead reckoning: position is estimated by integrating commanded
+   motion from the power-on angle (defined as 0 deg). Hard soft-limits then make
+   it physically impossible for the pan to wind away or be spun up by repeated
+   radar hits. CALIBRATE PAN_DPS_PER_US once (jog a known ~90 deg, time it, and
+   adjust until the on-screen angle matches reality). This only affects limit/
+   centring accuracy -- the anti-runaway guarantee holds at any value.          */
+#define PAN_DPS_PER_US    0.25f   // estimated degrees/sec per microsecond of offset
+#define PAN_LIMIT_DEG     100     // HARD limit: never drive past +/- this from zero
+#define PAN_SWEEP_RANGE   70      // guard sweep half-range from zero (< PAN_LIMIT_DEG)
+#define PAN_HOME_TOL      3       // "centred" tolerance for return-to-zero (deg)
+
+/* Guard uses STEP-SCAN: move a short step, then STOP and listen. The radars are
+   read only while stopped, so the camera never chases its own motion and a
+   noisy/continuous detection nudges it one step at most -- never spins it up.  */
+#define GUARD_MOVE_MS     500     // drive this long each step
+#define GUARD_DWELL_MS    450     // then stop & read the radars this long
 
 /* Onboard WS2812 status LED (GPIO48). Set to 0 to disable completely.         */
 #define USE_STATUS_LED    1
@@ -125,13 +139,14 @@ volatile int      g_panDir    = 0;           // what pan is doing right now (for
 
 // loop()-only servo state
 float tiltCur = TILT_CENTER_DEG;             // tilt current angle
-int      guardSweepDir   = 1;                // guard continuous-pan sweep direction
-uint32_t guardFlipAt     = 0;                // next sweep reversal time
-int      guardTrackDir   = 0;                // spin direction toward a radar hit
-uint32_t guardTrackUntil = 0;                // "drive toward hit" window end
-uint32_t guardHoldUntil  = 0;                // "stop & watch" window end
-uint32_t lastServoTick = 0;
-uint32_t lastGuardTick = 0;
+// PAN dead-reckoning position (0 = boot angle) + guard step-scan state
+float    panPosDeg       = 0;                // estimated pan angle from boot-zero
+uint32_t lastPanMs       = 0;                // for position integration
+volatile bool panHome    = false;            // "centre" -> drive back to zero
+int      guardDir        = 1;                // current guard step direction
+int      guardPhase      = 0;                // 0 = moving, 1 = dwell/listen
+uint32_t guardPhaseUntil = 0;
+uint32_t lastServoTick   = 0;
 
 // LEDC servo channels (timer 1 so we never collide with the camera's timer 0).
 #define PAN_LEDC_CH   LEDC_CHANNEL_2
@@ -361,48 +376,58 @@ void radarPoll(Radar& r) {
 }
 
 /* ============================================================================
-   Guard-mode logic  (sweep pan L<->R, slew toward whichever radar fires)
-   ========================================================================== */
-void guardUpdate(uint32_t now) {
-  if (g_mode != 1) return;
-
-  // Only MOVING detections (LD2410 state 1 or 3) steer the camera; a stationary
-  // object (chair/pet/standing person) keeps reporting present and must not
-  // hijack the scan.
-  bool l = radarL.present && (radarL.state == 1 || radarL.state == 3);
-  bool r = radarR.present && (radarR.state == 1 || radarR.state == 3);
-
-  if (l || r) {
-    guardTrackDir = (l && r)
-      ? (((int)radarL.movEng + radarL.statEng) >= ((int)radarR.movEng + radarR.statEng) ? -1 : +1)
-      : (l ? -1 : +1);                         // LEFT radar -> spin left (-1)
-    guardTrackUntil = now + GUARD_TRACK_MS;     // drive toward the hit briefly...
-    guardHoldUntil  = now + GUARD_TRACK_MS + GUARD_WATCH_MS;  // ...then stop & watch
-  }
-}
-
-// Pan spin direction for guard mode: -1 left, 0 stop, +1 right.
-int guardPanDir(uint32_t now) {
-  if (now < guardTrackUntil) return guardTrackDir;   // chasing a radar hit
-  if (now < guardHoldUntil)  return 0;               // watching (stopped)
-  if (now >= guardFlipAt) { guardSweepDir = -guardSweepDir; guardFlipAt = now + GUARD_LEG_MS; }
-  return guardSweepDir;                               // back-and-forth sweep
-}
-
-/* ============================================================================
-   Servo motion (smooth slew toward target)
+   Guard STEP-SCAN + servo motion.
+   PAN (continuous servo) uses boot-zero dead reckoning + hard soft-limits so it
+   can never wind away, and reads the radars ONLY while stopped (dwell) so it
+   never chases its own motion or gets spun up by a noisy/continuous detection.
    ========================================================================== */
 void panControlTick(uint32_t now) {
-  int dir;
-  if (g_mode == 1) dir = guardPanDir(now);
-  else             dir = (now < panCmdUntil) ? panCmdDir : 0;   // manual jog; release => stop
-  g_panDir = dir;
+  uint32_t dt = now - lastPanMs;
+  if (dt > 120) dt = 120;                 // cap after any stall so position can't jump
+  lastPanMs = now;
 
-  int us = PAN_STOP_US;
-  if (dir != 0) {
-    int off = (g_mode == 1) ? PAN_SWEEP_US : PAN_JOG_US;
-    us = PAN_STOP_US + (PAN_INVERT ? -dir : dir) * off;
+  int dir   = 0;
+  int offUs = PAN_JOG_US;
+
+  if (g_mode == 1) {
+    // GUARD: step-scan — move a bounded step, then STOP and listen.
+    offUs = PAN_SWEEP_US;
+    if (now >= guardPhaseUntil) {
+      if (guardPhase == 0) {                       // done moving -> dwell & listen
+        guardPhase = 1; guardPhaseUntil = now + GUARD_DWELL_MS;
+      } else {                                     // done listening -> choose next step
+        guardPhase = 0; guardPhaseUntil = now + GUARD_MOVE_MS;
+        bool l = radarL.present && (radarL.state == 1 || radarL.state == 3);
+        bool r = radarR.present && (radarR.state == 1 || radarR.state == 3);
+        if (l && !r)      guardDir = -1;           // movement left  -> step left
+        else if (r && !l) guardDir = +1;           // movement right -> step right
+        else if (l && r)  guardDir = (((int)radarL.movEng + radarL.statEng) >=
+                                      ((int)radarR.movEng + radarR.statEng)) ? -1 : +1;
+        else {                                     // nothing moving -> sweep, reverse at range
+          if (panPosDeg >=  PAN_SWEEP_RANGE) guardDir = -1;
+          else if (panPosDeg <= -PAN_SWEEP_RANGE) guardDir = +1;
+        }
+      }
+    }
+    dir = (guardPhase == 0) ? guardDir : 0;        // move in move-phase, stop during dwell
+  } else if (panHome) {
+    // return to boot-zero (centre)
+    float ap = panPosDeg < 0 ? -panPosDeg : panPosDeg;
+    if (ap <= PAN_HOME_TOL) { panHome = false; dir = 0; }
+    else dir = (panPosDeg > 0) ? -1 : +1;
+  } else {
+    // MANUAL jog while a recent button command is live; release => stop
+    dir = (now < panCmdUntil) ? panCmdDir : 0;
   }
+
+  // Hard soft-limits from boot-zero: never drive past +/- PAN_LIMIT_DEG (anti wind-up).
+  if (dir < 0 && panPosDeg <= -PAN_LIMIT_DEG) dir = 0;
+  if (dir > 0 && panPosDeg >=  PAN_LIMIT_DEG) dir = 0;
+
+  // Integrate the dead-reckoning position, then drive the servo.
+  if (dir != 0) panPosDeg += dir * (offUs * PAN_DPS_PER_US) * (dt / 1000.0f);
+  g_panDir = dir;
+  int us = PAN_STOP_US + (dir == 0 ? 0 : (PAN_INVERT ? -dir : dir) * offUs);
   servoWriteRawUs(PAN_LEDC_CH, us);
 }
 
@@ -413,7 +438,7 @@ void servoTick(uint32_t now) {
   else if (tiltCur > tt) tiltCur = max(tt, tiltCur - SERVO_SLEW_DEG);
   servoWrite(TILT_LEDC_CH, tiltCur, TILT_INVERT);
 
-  // PAN: continuous rotation — spin direction/speed
+  // PAN: continuous rotation — position-tracked, soft-limited, step-scan guard
   panControlTick(now);
 }
 
@@ -477,9 +502,9 @@ bool initCamera() {
       s->set_brightness(s, 1);
       s->set_saturation(s, -2);
     }
-    s->set_framesize(s, g_psram ? DEFAULT_FRAMESIZE : FRAMESIZE_QVGA);
+    s->set_framesize(s, FRAMESIZE_QVGA);   // start small + fast for smooth real-time; bump via UI
   }
-  g_resLabel = g_psram ? "VGA" : "QVGA";
+  g_resLabel = "QVGA";
   Serial.printf("[CAM] ready | PSRAM: %s | start res: %s | fb_count: %d\n",
                 g_psram ? "YES" : "NO  <-- set Tools>PSRAM>OPI PSRAM and re-flash!",
                 g_resLabel, config.fb_count);
@@ -533,8 +558,8 @@ a{color:var(--acc)}
    <div id=psw>&#9888; PSRAM is OFF &mdash; set Tools &gt; PSRAM &gt; <b>OPI PSRAM</b> in Arduino IDE and re-flash. The feed stays slow until you do.</div>
   </div>
   <div class=seg>
-   <button data-r=qvga>QVGA<br><span class=mut>fastest</span></button>
-   <button data-r=vga class=sel>VGA<br><span class=mut>balanced</span></button>
+   <button data-r=qvga class=sel>QVGA<br><span class=mut>fast</span></button>
+   <button data-r=vga>VGA<br><span class=mut>balanced</span></button>
    <button data-r=svga>SVGA<br><span class=mut>sharp</span></button>
   </div>
   <div class=seg>
@@ -572,8 +597,8 @@ function pump(){
  if(mode!=='snap'||busy) return;
  busy=true; var g=++gen; var nxt=imgs[1-cur];
  nxt.onload=function(){ busy=false; if(g!==gen||mode!=='snap') return;
-  nxt.style.opacity=1; imgs[cur].style.opacity=0; cur=1-cur; requestAnimationFrame(pump); };
- nxt.onerror=function(){ busy=false; if(mode==='snap') setTimeout(pump,300); };
+  nxt.style.opacity=1; imgs[cur].style.opacity=0; cur=1-cur; pump(); };
+ nxt.onerror=function(){ busy=false; if(mode==='snap') setTimeout(pump,120); };
  nxt.src=capURL();
 }
 function setMode(m){
@@ -606,7 +631,7 @@ function ago(t,now){var s=Math.max(0,Math.round((now-t)/1000));return s<1?'now':
 function bars(rssi){var n=rssi>=-60?4:rssi>=-70?3:rssi>=-80?2:1;var s='';for(var k=0;k<4;k++){var ht=4+k*3;s+='<i style="height:'+ht+'px;background:'+(k<n?'#2ea043':'#555')+'"></i>';}return s;}
 function poll(){fetch('/status').then(function(r){return r.json();}).then(function(j){
  document.getElementById('st').textContent=(j.mode?'GUARD':'manual')+' · '+j.ip;
- document.getElementById('pan').textContent=(j.panspin<0?'◄ left':(j.panspin>0?'right ►':'■ stop'));
+ document.getElementById('pan').textContent=(j.panspin<0?'◄':(j.panspin>0?'►':'■'))+' '+(j.panpos!=null?j.panpos+'°':'');
  document.getElementById('tilt').textContent=j.tilt;
  document.getElementById('fps').textContent=(j.fps!=null?j.fps:'--');
  document.getElementById('res').textContent=j.res?(' '+j.res):'';
@@ -698,6 +723,7 @@ esp_err_t status_handler(httpd_req_t* req) {
   out.reserve(1600);
   out  = "{\"mode\":"; out += g_mode;
   out += ",\"panspin\":"; out += g_panDir;      // -1 left, 0 stop, +1 right (continuous pan)
+  out += ",\"panpos\":";  out += (int)panPosDeg; // estimated pan angle from boot-zero
   out += ",\"tilt\":"; out += (int)tiltCur;
   out += ",\"now\":";  out += (uint32_t)millis();
   out += ",\"ip\":\""; out += WiFi.localIP().toString(); out += "\"";
@@ -734,7 +760,7 @@ esp_err_t cmd_handler(httpd_req_t* req) {
     if (q && httpd_req_get_url_query_str(req, q, qlen) == ESP_OK) {
 
       if (httpd_query_key_value(q, "move", val, sizeof(val)) == ESP_OK) {
-        g_mode = 0;                               // taking manual control cancels guard
+        g_mode = 0; panHome = false;              // manual control cancels guard + homing
         uint32_t mnow = millis();
         if (!strcmp(val, "up"))    tiltTarget = clampi(tiltTarget + STEP_DEG, TILT_MIN_DEG, TILT_MAX_DEG);
         if (!strcmp(val, "down"))  tiltTarget = clampi(tiltTarget - STEP_DEG, TILT_MIN_DEG, TILT_MAX_DEG);
@@ -742,7 +768,9 @@ esp_err_t cmd_handler(httpd_req_t* req) {
         if (!strcmp(val, "right")) { panCmdDir = +1; panCmdUntil = mnow + PAN_CMD_MS; }
       }
       if (httpd_query_key_value(q, "center", val, sizeof(val)) == ESP_OK) {
-        g_mode = 0; panCmdDir = 0; panCmdUntil = 0; tiltTarget = TILT_CENTER_DEG;  // pan stops, tilt centres
+        g_mode = 0; panCmdDir = 0; panCmdUntil = 0;
+        panHome = true;                           // pan returns to boot-zero
+        tiltTarget = TILT_CENTER_DEG;             // tilt centres
       }
       if (httpd_query_key_value(q, "guard", val, sizeof(val)) == ESP_OK) {
         g_mode = (val[0] == '1') ? 1 : 0;
@@ -851,6 +879,7 @@ void setup() {
   servoSetup();
   servoWriteRawUs(PAN_LEDC_CH, PAN_STOP_US);        // continuous pan: STOP at boot (no spinning)
   servoWrite(TILT_LEDC_CH, tiltCur, TILT_INVERT);   // positional tilt: centre
+  panPosDeg = 0; lastPanMs = millis();              // this boot angle = zero reference
 
   // Radars (RX only; 256000 baud default for LD2410C).
   radarL = Radar(); radarR = Radar();
@@ -885,7 +914,6 @@ void loop() {
   radarPoll(radarR);
 
   uint32_t now = millis();
-  if (now - lastGuardTick >= GUARD_TICK_MS) { lastGuardTick = now; guardUpdate(now); }
   if (now - lastServoTick >= SERVO_TICK_MS) { lastServoTick = now; servoTick(now); }
 
   // Stream FPS counter: frames served in the last second (shown in the web HUD).
