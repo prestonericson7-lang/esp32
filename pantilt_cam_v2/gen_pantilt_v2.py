@@ -62,15 +62,17 @@ P = dict(
     cable_slot_w=13.0, cable_slot_h=7.5,   # side entry into the bore (USB-C plug passes)
     bush_clear=0.2,                  # radial clearance head bore / post
     clip_t=1.5, clip_groove_d=27.0, clip_play=0.3, clip_od=35.0,
+    clip_groove_above=8.3,           # groove bottom above the head plate top WITHOUT the washer (base stays as printed)
+    washer_t=2.0, washer_od=38.0, washer_clear=0.3, use_washer=True,   # 2 mm spacer on the thrust ring, always fitted
     thrust_ring_w=4.0,               # smooth annulus on the sun flange top, from the post outwards
     magnet_d=8.2, magnet_h=5.0, home_r=30.0,   # optional reed-switch homing: magnet in head, switch in base
 
     # ---- pan head (yoke plate) ----
     head_t=4.5,
-    hub_od=36.0, hub_h=8.0,          # bushing tube above the plate (bore = post + 2*bush_clear)
-    tilt_z=48.0,                     # tilt axis above head plate top
-    wall_t=3.0, wall_w=28.0, wall_h=60.0, wall_x=-49.5,   # wall_x = wall OUTER face (tilt servo ear TOP lands here)
-    col_x0=43.0, col_x1=50.0, col_y_back=16.0, col_y_front=-6.0, col_top=54.0,
+    hub_od=36.0, hub_h=6.0,          # bushing tube above the plate (2 mm shorter: the washer lifts the head 2 mm)
+    tilt_z=88.0,                     # tilt axis above head plate top (pod raised ~40 mm for wire room)
+    wall_t=4.0, wall_w=28.0, wall_h=101.0, wall_x=-49.5,  # wall_x = wall OUTER face (tilt servo ear TOP lands here)
+    col_x0=43.0, col_x1=50.0, col_y_back=16.0, col_y_front=-6.0, col_top=94.0,
     col_slope_h=10.0,                # 45 deg lean-forward below the pin hole
     pin_d=6.0, pin_hole_col=6.1, pin_hole_pod=6.4, pin_head_d=10.0, pin_head_t=2.5,
     pan_srv_tooth=10,                # pan servo shaft sits on sun tooth line number k (angle k*360/N_sun)
@@ -369,10 +371,10 @@ def part_base():
     # hollow bore all the way, open at the top
     body -= cyl_z(P["post_bore"] / 2, -bt - 1, z_top + 1, seg=SEG)
     # side slot at the top of the post for thin leads (towards +Y = back), above the C-clip
-    zs0 = zu + P["head_t"] + P["hub_h"] + P["clip_t"] + P["clip_play"] + 0.8
+    zs0 = zu + P["head_t"] + P["clip_groove_above"] + P["clip_t"] + 0.8   # = 35.1, as on the printed base
     body -= box(-7.0, 7.0, 0, P["post_od"] / 2 + 1, zs0, z_top + 1)
-    # C-clip groove just above the hub
-    zc0 = zu + P["head_t"] + P["hub_h"] + P["clip_play"]
+    # C-clip groove (fixed height: the base is already printed)
+    zc0 = zu + P["head_t"] + P["clip_groove_above"]
     body -= (cyl_z(P["post_od"] / 2 + 1, zc0, zc0 + P["clip_t"] + 0.2, seg=SEG) - cyl_z(P["clip_groove_d"] / 2, zc0 - 1, zc0 + P["clip_t"] + 1, seg=SEG))
     # cable entry: notch through the foot/gear/post wall at plate level on the -Y side, into the bore
     body -= box(-P["cable_slot_w"] / 2, P["cable_slot_w"] / 2, -P["foot_d"] / 2 - 1, 0, -bt + 1.5, P["cable_slot_h"])
@@ -462,14 +464,14 @@ def part_head(with_holders=True):
     for s in (-1, 1):
         yg0 = s * (ww / 2) - (gt if s > 0 else 0)
         yg1 = yg0 + gt
-        out_g = poly([[wx, -0.5], [wx - 6.0, -0.5], [wx, 35.0]]).extrude(gt).rotate([90, 0, 0]).translate([0, yg1, 0])
-        in_g = poly([[wx + wt, -0.5], [wx + wt + 10.0, -0.5], [wx + wt, 12.0]]).extrude(gt).rotate([90, 0, 0]).translate([0, yg1, 0])
+        out_g = poly([[wx, -0.5], [wx - 10.0, -0.5], [wx, 75.0]]).extrude(gt).rotate([90, 0, 0]).translate([0, yg1, 0])
+        in_g = poly([[wx + wt, -0.5], [wx + wt + 14.0, -0.5], [wx + wt, 45.0]]).extrude(gt).rotate([90, 0, 0]).translate([0, yg1, 0])
         wall += out_g + (in_g if s > 0 else Manifold())
     head += wall
     # ---- pin column (right) ----
     col = column_profile_yz().extrude(P["col_x1"] - P["col_x0"]).rotate([90, 0, 90]).translate([P["col_x0"], 0, 0])
     col -= teardrop_x(P["pin_hole_col"] / 2, P["col_x0"] - 1, P["col_x1"] + 1, 0, tz, point="+z")
-    cg = poly([[P["col_y_back"], -0.5], [P["col_y_back"] + 10.0, -0.5], [P["col_y_back"], 30.0]]).extrude(P["col_x1"] - P["col_x0"]).rotate([90, 0, 90]).translate([P["col_x0"], 0, 0])
+    cg = poly([[P["col_y_back"], -0.5], [P["col_y_back"] + 16.0, -0.5], [P["col_y_back"], 70.0]]).extrude(P["col_x1"] - P["col_x0"]).rotate([90, 0, 90]).translate([P["col_x0"], 0, 0])
     head += col + cg
     # ---- radar holders at the front corners, yawed +/-45 ----
     if with_holders:
@@ -504,6 +506,12 @@ def part_pinion():
         a = math.radians(60 * k + 30)
         g -= cyl_z(min(3.5, (gi["rf"] - 7.0) / 2 - 2.5), -1, h + 1, rr * math.cos(a), rr * math.sin(a), seg=SEG_SMALL)
     return g, gi
+
+# --------------------------------------------------------------------------
+# PART 4b: 2 mm spacer washer on the thrust ring under the head (print flat)
+# --------------------------------------------------------------------------
+def part_washer():
+    return cyl_z(P["washer_od"] / 2, 0, P["washer_t"], seg=SEG) - cyl_z(P["post_od"] / 2 + P["washer_clear"], -1, P["washer_t"] + 1, seg=SEG)
 
 # --------------------------------------------------------------------------
 # PART 4: C-clip for the post (print flat)
@@ -612,8 +620,8 @@ def part_pin():
 # Assembly transforms
 # --------------------------------------------------------------------------
 def head_z():
-    """world Z of the head plate TOP (head-local z = 0)"""
-    return P["head_under"] + P["head_t"]
+    """world Z of the head plate TOP (head-local z = 0); the washer lifts the whole head"""
+    return P["head_under"] + P["head_t"] + (P["washer_t"] if P["use_washer"] else 0.0)
 
 def pod_in_head(tilt_deg=0.0):
     """pod-local -> head-local transform applied to a manifold"""
@@ -633,8 +641,13 @@ def pan_servo_in_head():
     return lambda m: m.rotate([180, 0, 0]).translate([sx, sy, P["srv_ear_t"] + P["pan_pad_h"]])
 
 def clip_in_head():
-    """clip-local (z=0 bottom) -> head-local: sits in the post groove just above the hub"""
-    return lambda m: m.translate([0, 0, P["hub_h"] + P["clip_play"]])
+    """clip-local (z=0 bottom) -> head-local: the groove is at a fixed world height on the base"""
+    zg = P["head_under"] + P["head_t"] + P["clip_groove_above"] - head_z()
+    return lambda m: m.translate([0, 0, zg])
+
+def washer_world():
+    """washer-local (z=0 bottom) -> world: on the thrust ring"""
+    return lambda m: m.translate([0, 0, P["head_under"]])
 
 if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
@@ -649,6 +662,7 @@ if __name__ == "__main__":
     pinion, gi = part_pinion()
     parts["pinion"] = pinion
     parts["clip"] = part_clip()
+    parts["washer"] = part_washer()
     for k, m in parts.items():
         tm = to_trimesh(m)
         print(f"{k:6s} status={m.status()} tris={m.num_tri():6d} vol={m.volume():9.0f} mm3  bbox={np.round(tm.bounds,1).tolist()} watertight={tm.is_watertight}")

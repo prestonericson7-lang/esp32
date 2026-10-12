@@ -31,7 +31,8 @@ Print file: **`out/pantilt_cam_v2_A1mini.3mf`** (Bambu Studio, two A1 mini plate
 | 1 | 6 Pan pinion 28T | screw side down | module 1.5, Ø45, 8 mm thick, Ø4.7 spline socket on top, screw-head recess underneath, grooves for the ear-screw tips |
 | 1 | 5 Pivot pin | standing on its head | Ø6 × 14 shank. Print 2–3 |
 | 1 | 7 Post C-clip | flat | Ø35, snaps sideways into the Ø27 groove. Print 2–3 |
-| 2 | 2 Pan head | plate down | yoke plate + Ø36 hub + pan-servo pad/window + tilt-servo wall + pin column + two LD2410C holders |
+| 1 | 8 Spacer washer | flat | Ø38 / Ø30.6 / 2 mm, sits on the thrust ring under the head. Always fitted |
+| 2 | 2 Pan head | plate down | yoke plate + Ø36 hub (6 mm) + pan-servo pad/window + 101 mm tilt-servo wall + pin column + two LD2410C holders. 105 mm tall print |
 
 Settings: **0.2 mm layers, 0.4 nozzle, 3–4 walls, 20 % infill, PLA or (better for the gears) PETG,
 no supports.** Bridges are short (13 mm cable slot, 13 mm servo window, 25 mm USB opening); every
@@ -92,7 +93,8 @@ plastic) and its header rows run 8 mm longer than the real board's (they graze a
    the head, shaft **down**, ears on the pad, two ear screws into the slotted pilot holes. Press the
    pinion onto the spline from below (ream the Ø4.7 socket to 4.8 if it is really tight) and put the
    centre screw up through the pinion from underneath.
-3. **Head onto the post.** Grease the post and the ring. Set the servo to its centre, lower the head
+3. **Head onto the post.** Grease the post and the ring, drop the 2 mm washer over the post onto the
+   ring. Set the servo to its centre, lower the head
    over the post with the pinion teeth entering the sun gear — any tooth; to re-seat "forward", lift
    the head and drop it back one tooth over (12.9° per tooth). Snap the C-clip into the groove just
    above the hub, from the side.
@@ -163,8 +165,8 @@ python3 pack_3mf.py          # Bambu 3MF (A1 mini) + generic 3MF + print-oriente
 | servo pocket / window | 23.4 × 12.9 (MG90S case 22.8 × 12.2); ear pilots 1.8 × 2.4 slots on 28.0 mm centres |
 | spline sockets | Ø4.7, 5 deep (pod) / 4 deep (pinion), Ø2.3 centre-screw hole |
 | pan gears | module 1.5, 28T/28T, 20°, centre distance 42.1, backlash 0.15/gear, face width 10.5 (sun) / 8 (pinion) |
-| post / journal | Ø30 post, Ø18 bore, head bore Ø30.4, 12.5 mm long, thrust ring Ø30–38, C-clip groove Ø27 |
-| tilt axis | 48 mm above the head plate top, 5 mm behind the pod's depth centre |
+| post / journal | Ø30 post, Ø18 bore, head bore Ø30.4, 10.5 mm long (4.5 plate + 6 hub), 2 mm washer on the Ø30–38 thrust ring, C-clip groove Ø27 at 12.8 above the plate underside |
+| tilt axis | 88 mm above the head plate top (pod bottom ~70 mm above the plate for wire room), 5 mm behind the pod's depth centre |
 | pod cavity | 72 × 31 × 29.5 (board 68 × 29 incl. module overhang, 24 mm behind the PCB for Dupont housings) |
 | radar holder grooves | 2.0 mm wide, 1.2 mm deep each side (PCB 1.0–1.6) |
 | pivot pin | Ø6 in a Ø6.1 column hole (friction) and Ø6.4 pod hole (free) |

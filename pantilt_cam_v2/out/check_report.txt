@@ -1,11 +1,12 @@
 == part sanity
   base   watertight=True genus=6 vol=   65003
-  head   watertight=True genus=8 vol=   61733
+  head   watertight=True genus=8 vol=   75306
   pod    watertight=True genus=4 vol=   24711
   cover  watertight=True genus=3 vol=    8088
   pin    watertight=True genus=0 vol=     596
   pinion watertight=True genus=7 vol=    8137
   clip   watertight=True genus=0 vol=     353
+  washer watertight=True genus=1 vol=     797
 
 == parts vs parts (pan 0, tilt 0)
   base ^ head (bushing + thrust collar)        intersect =     0.000 mm3
@@ -15,37 +16,41 @@
   head ^ clip                                  intersect =     0.000 mm3
   head ^ pod                                   intersect =     0.000 mm3
   head ^ cover                                 intersect =     0.000 mm3
-  pod ^ cover (lip in cavity)                  intersect =    -0.000 mm3
+  pod ^ cover (lip in cavity)                  intersect =     0.000 mm3
   pin ^ head (hole 4.9 vs pin 4.8)             intersect =     0.000 mm3
   pin ^ pod (hole 5.2 vs pin 4.8)              intersect =     0.000 mm3
   base ^ pod                                   intersect =     0.000 mm3
   pinion ^ pod                                 intersect =     0.000 mm3
+  washer ^ base (on the ring)                  intersect =    -0.000 mm3
+  washer ^ head                                intersect =     0.000 mm3
+  washer ^ pinion                              intersect =     0.000 mm3
+  hub top (world) = 32.50, clip groove bottom = 32.80 -> clip clearance above the hub = 0.30 mm
 
 == pan sweep (gear mesh, bushing, pod/base) 0..360
   pan   0: base^pinion =   0.000  base^head =   0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
   pan  15: base^pinion =   0.000  base^head =   0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
-  pan  30: base^pinion =   0.000  base^head =  -0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
-  pan  45: base^pinion =   0.000  base^head =  -0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
+  pan  30: base^pinion =   0.000  base^head =   0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
+  pan  45: base^pinion =   0.000  base^head =   0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
   pan  60: base^pinion =   0.000  base^head =   0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
-  pan  75: base^pinion =   0.000  base^head =  -0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
+  pan  75: base^pinion =   0.000  base^head =   0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
   pan  90: base^pinion =   0.000  base^head =   0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
-  pan 105: base^pinion =   0.000  base^head =  -0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
-  pan 120: base^pinion =   0.000  base^head =  -0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
+  pan 105: base^pinion =   0.000  base^head =   0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
+  pan 120: base^pinion =   0.000  base^head =   0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
   pan 135: base^pinion =   0.000  base^head =   0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
   pan 150: base^pinion =   0.000  base^head =   0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
-  pan 165: base^pinion =   0.000  base^head =  -0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
+  pan 165: base^pinion =   0.000  base^head =   0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
   pan 180: base^pinion =   0.000  base^head =   0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
   pan 195: base^pinion =   0.000  base^head =   0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
-  pan 210: base^pinion =   0.000  base^head =  -0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
-  pan 225: base^pinion =   0.000  base^head =  -0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
-  pan 240: base^pinion =   0.000  base^head =  -0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
-  pan 255: base^pinion =   0.000  base^head =  -0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
+  pan 210: base^pinion =   0.000  base^head =   0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
+  pan 225: base^pinion =   0.000  base^head =   0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
+  pan 240: base^pinion =   0.000  base^head =   0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
+  pan 255: base^pinion =   0.000  base^head =   0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
   pan 270: base^pinion =   0.000  base^head =   0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
-  pan 285: base^pinion =   0.000  base^head =  -0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
-  pan 300: base^pinion =   0.000  base^head =  -0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
+  pan 285: base^pinion =   0.000  base^head =   0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
+  pan 300: base^pinion =   0.000  base^head =   0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
   pan 315: base^pinion =   0.000  base^head =   0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
   pan 330: base^pinion =   0.000  base^head =   0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
-  pan 345: base^pinion =   0.000  base^head =  -0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
+  pan 345: base^pinion =   0.000  base^head =   0.000  base^pod =   0.000   pinion-gear min gap =  0.18 mm
 
 == components vs printed parts (tilt 0)
   pan servo body ^ head (window)               intersect =     0.000 mm3
@@ -89,48 +94,48 @@
   esp headers ^ cover                          intersect =     0.000 mm3
   esp pins ^ cover                             intersect =     0.000 mm3
   esp module ^ cover                           intersect =     0.000 mm3
-  pan servo spline extent: [-28.55, 30.62, 16.6] -> [-23.95, 35.22, 20.0]
-  tilt servo spline extent: [-43.0, -2.3, 70.2] -> [-39.6, 2.3, 74.8]
-  pinion z range 11.50..19.50 (socket 4.0 deep from the top); pan spline z 16.60..20.00 -> engagement ~2.90 mm
+  pan servo spline extent: [-28.55, 30.62, 18.6] -> [-23.95, 35.22, 22.0]
+  tilt servo spline extent: [-43.0, -2.3, 112.2] -> [-39.6, 2.3, 116.8]
+  pinion z range 13.50..21.50 (socket 4.0 deep from the top); pan spline z 18.60..22.00 -> engagement ~2.90 mm
 
 == tilt sweep (pod+cover vs head/base/post/clip; USB plugs vs head). +tilt = camera looks DOWN
-  tilt  -90: pod-to-post/base gap = 21.50 mm   plug^fixed =     0.0 mm3
-  tilt  -85: pod-to-post/base gap = 20.06 mm   plug^fixed =     0.0 mm3
-  tilt  -80: pod-to-post/base gap = 18.57 mm   plug^fixed =     0.0 mm3
-  tilt  -75: pod-to-post/base gap = 17.27 mm   plug^fixed =     0.0 mm3
-  tilt  -70: pod-to-post/base gap = 16.10 mm   plug^fixed =     0.0 mm3
-  tilt  -65: pod-to-post/base gap = 15.06 mm   plug^fixed =     0.0 mm3
-  tilt  -60: pod-to-post/base gap = 14.17 mm   plug^fixed =     0.0 mm3
-  tilt  -55: pod-to-post/base gap = 13.44 mm   plug^fixed =     0.0 mm3
-  tilt  -50: pod-to-post/base gap = 12.85 mm   plug^fixed =     0.0 mm3
-  tilt  -45: pod-to-post/base gap = 12.43 mm   plug^fixed =     0.0 mm3
-  tilt  -40: pod-to-post/base gap = 12.18 mm   plug^fixed =     0.0 mm3
-  tilt  -35: pod-to-post/base gap = 12.09 mm   plug^fixed =     0.0 mm3
-  tilt  -30: pod-to-post/base gap = 12.16 mm   plug^fixed =     0.0 mm3
-  tilt  -25: pod-to-post/base gap = 12.40 mm   plug^fixed =     0.0 mm3
-  tilt  -20: pod-to-post/base gap = 12.81 mm   plug^fixed =     0.0 mm3
-  tilt  -15: pod-to-post/base gap = 13.38 mm   plug^fixed =     0.0 mm3
-  tilt  -10: pod-to-post/base gap = 14.10 mm   plug^fixed =     0.0 mm3
-  tilt   -5: pod-to-post/base gap = 14.98 mm   plug^fixed =     0.0 mm3
-  tilt    0: pod-to-post/base gap = 16.00 mm   plug^fixed =     0.0 mm3
-  tilt    5: pod-to-post/base gap = 14.56 mm   plug^fixed =     0.0 mm3
-  tilt   10: pod-to-post/base gap = 12.88 mm   plug^fixed =     0.0 mm3
-  tilt   15: pod-to-post/base gap = 10.99 mm   plug^fixed =     0.0 mm3
-  tilt   20: pod-to-post/base gap =  9.39 mm   plug^fixed =     0.0 mm3
-  tilt   25: pod-to-post/base gap =  8.18 mm   plug^fixed =     0.0 mm3
-  tilt   30: pod-to-post/base gap =  7.16 mm   plug^fixed =     0.0 mm3
-  tilt   35: pod-to-post/base gap =  6.35 mm   plug^fixed =     0.0 mm3
-  tilt   40: pod-to-post/base gap =  5.75 mm   plug^fixed =     0.0 mm3
-  tilt   45: pod-to-post/base gap =  5.36 mm   plug^fixed =     0.0 mm3
-  tilt   50: pod-to-post/base gap =  5.19 mm   plug^fixed =     0.0 mm3
-  tilt   55: pod-to-post/base gap =  5.24 mm   plug^fixed =     0.0 mm3
-  tilt   60: pod-to-post/base gap =  5.51 mm   plug^fixed =     0.0 mm3
-  tilt   65: pod-to-post/base gap =  6.00 mm   plug^fixed =     3.1 mm3 PLUG-HITS
-  tilt   70: pod-to-post/base gap =  6.70 mm   plug^fixed =    45.1 mm3 PLUG-HITS
-  tilt   75: pod-to-post/base gap =  7.61 mm   plug^fixed =   124.0 mm3 PLUG-HITS
-  tilt   80: pod-to-post/base gap =  8.73 mm   plug^fixed =   198.4 mm3 PLUG-HITS
-  tilt   85: pod-to-post/base gap = 10.22 mm   plug^fixed =   269.1 mm3 PLUG-HITS
-  tilt   90: pod-to-post/base gap = 11.50 mm   plug^fixed =   337.3 mm3 PLUG-HITS
+  tilt  -90: pod-to-post/base gap = 40.00 mm   plug^fixed =     0.0 mm3
+  tilt  -85: pod-to-post/base gap = 40.00 mm   plug^fixed =     0.0 mm3
+  tilt  -80: pod-to-post/base gap = 40.00 mm   plug^fixed =     0.0 mm3
+  tilt  -75: pod-to-post/base gap = 40.00 mm   plug^fixed =     0.0 mm3
+  tilt  -70: pod-to-post/base gap = 40.00 mm   plug^fixed =     0.0 mm3
+  tilt  -65: pod-to-post/base gap = 40.00 mm   plug^fixed =     0.0 mm3
+  tilt  -60: pod-to-post/base gap = 40.00 mm   plug^fixed =     0.0 mm3
+  tilt  -55: pod-to-post/base gap = 40.00 mm   plug^fixed =     0.0 mm3
+  tilt  -50: pod-to-post/base gap = 40.00 mm   plug^fixed =     0.0 mm3
+  tilt  -45: pod-to-post/base gap = 40.00 mm   plug^fixed =     0.0 mm3
+  tilt  -40: pod-to-post/base gap = 40.00 mm   plug^fixed =     0.0 mm3
+  tilt  -35: pod-to-post/base gap = 40.00 mm   plug^fixed =     0.0 mm3
+  tilt  -30: pod-to-post/base gap = 40.00 mm   plug^fixed =     0.0 mm3
+  tilt  -25: pod-to-post/base gap = 40.00 mm   plug^fixed =     0.0 mm3
+  tilt  -20: pod-to-post/base gap = 40.00 mm   plug^fixed =     0.0 mm3
+  tilt  -15: pod-to-post/base gap = 40.00 mm   plug^fixed =     0.0 mm3
+  tilt  -10: pod-to-post/base gap = 40.00 mm   plug^fixed =     0.0 mm3
+  tilt   -5: pod-to-post/base gap = 40.00 mm   plug^fixed =     0.0 mm3
+  tilt    0: pod-to-post/base gap = 40.00 mm   plug^fixed =     0.0 mm3
+  tilt    5: pod-to-post/base gap = 40.00 mm   plug^fixed =     0.0 mm3
+  tilt   10: pod-to-post/base gap = 40.00 mm   plug^fixed =     0.0 mm3
+  tilt   15: pod-to-post/base gap = 40.00 mm   plug^fixed =     0.0 mm3
+  tilt   20: pod-to-post/base gap = 40.00 mm   plug^fixed =     0.0 mm3
+  tilt   25: pod-to-post/base gap = 40.00 mm   plug^fixed =     0.0 mm3
+  tilt   30: pod-to-post/base gap = 40.00 mm   plug^fixed =     0.0 mm3
+  tilt   35: pod-to-post/base gap = 40.00 mm   plug^fixed =     0.0 mm3
+  tilt   40: pod-to-post/base gap = 40.00 mm   plug^fixed =     0.0 mm3
+  tilt   45: pod-to-post/base gap = 40.00 mm   plug^fixed =     0.0 mm3
+  tilt   50: pod-to-post/base gap = 40.00 mm   plug^fixed =     0.0 mm3
+  tilt   55: pod-to-post/base gap = 40.00 mm   plug^fixed =     0.0 mm3
+  tilt   60: pod-to-post/base gap = 40.00 mm   plug^fixed =     0.0 mm3
+  tilt   65: pod-to-post/base gap = 40.00 mm   plug^fixed =     3.1 mm3 PLUG-HITS
+  tilt   70: pod-to-post/base gap = 40.00 mm   plug^fixed =    45.1 mm3 PLUG-HITS
+  tilt   75: pod-to-post/base gap = 40.00 mm   plug^fixed =   124.0 mm3 PLUG-HITS
+  tilt   80: pod-to-post/base gap = 40.00 mm   plug^fixed =   198.4 mm3 PLUG-HITS
+  tilt   85: pod-to-post/base gap = 40.00 mm   plug^fixed =   269.1 mm3 PLUG-HITS
+  tilt   90: pod-to-post/base gap = 40.00 mm   plug^fixed =   337.3 mm3 PLUG-HITS
   -> pod never touches anything fixed: True;  USB plug clears down to +60 deg, up to -90 deg
 
 == overhang faces for base (plate down): 230 faces, 336.4 mm2 (bed at z=0)
@@ -138,14 +143,15 @@
    z=  11.5  area=   202.2 mm2  x[   -6.5,    6.5] y[  -18.8,  -11.9]
    z=  38.5  area=   134.2 mm2  x[  -15.0,   15.0] y[  -14.5,   14.5]
 
-== overhang faces for head (plate down): 30 faces, 58.0 mm2 (bed at z=0)
-   z=  34.0  area=     1.4 mm2  x[  -48.5,  -47.5] y[   -1.5,    1.5]
-   z=  34.2  area=     1.4 mm2  x[  -48.5,  -47.5] y[   -1.3,    1.3]
-   z=  34.3  area=     6.8 mm2  x[  -48.5,  -47.5] y[   -1.1,    1.1]
-   z=  58.8  area=    38.7 mm2  x[  -48.5,  -47.5] y[   -2.1,    2.1]
-   z=  62.0  area=     1.4 mm2  x[  -48.5,  -47.5] y[   -1.5,    1.5]
-   z=  62.2  area=     1.4 mm2  x[  -48.5,  -47.5] y[   -1.3,    1.3]
-   z=  62.3  area=     6.8 mm2  x[  -48.5,  -47.5] y[   -1.1,    1.1]
+== overhang faces for head (plate down): 34 faces, 84.8 mm2 (bed at z=0)
+   z=   4.0  area=     7.5 mm2  x[  -59.0,  -58.5] y[  -13.2,   13.2]
+   z=  74.0  area=     1.9 mm2  x[  -48.2,  -46.8] y[   -1.5,    1.5]
+   z=  74.2  area=     1.9 mm2  x[  -48.2,  -46.8] y[   -1.3,    1.3]
+   z=  74.3  area=     9.1 mm2  x[  -48.2,  -46.8] y[   -1.1,    1.1]
+   z=  98.8  area=    51.6 mm2  x[  -48.2,  -46.8] y[   -2.1,    2.1]
+   z= 102.0  area=     1.9 mm2  x[  -48.2,  -46.8] y[   -1.5,    1.5]
+   z= 102.2  area=     1.9 mm2  x[  -48.2,  -46.8] y[   -1.3,    1.3]
+   z= 102.3  area=     9.1 mm2  x[  -48.2,  -46.8] y[   -1.1,    1.1]
 
 == overhang faces for pod (front face down): 58 faces, 104.0 mm2 (bed at z=0)
    z=  10.0  area=    62.5 mm2  x[   36.8,   37.7] y[   -4.2,    4.2]

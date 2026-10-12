@@ -31,6 +31,8 @@ def world_parts(tilt=0.0, pan=0.0):
     roll = g.pinion_phase_deg() + pan * (P["gear_base_T"] / P["gear_pin_T"])
     W["pinion"] = H(g.pinion_in_head()(pinion.rotate([0, 0, roll])))
     W["clip"] = H(g.clip_in_head()(clip))
+    if P["use_washer"]:
+        W["washer"] = g.washer_world()(g.part_washer())
     return W
 
 def ghosts(tilt=0.0, pan=0.0):
@@ -119,7 +121,10 @@ if __name__ == "__main__":
         ("pin ^ pod (hole 5.2 vs pin 4.8)", W0["pin"], W0["pod"]),
         ("base ^ pod", W0["base"], W0["pod"]),
         ("pinion ^ pod", W0["pinion"], W0["pod"]),
-    ])
+    ] + ([("washer ^ base (on the ring)", W0["washer"], W0["base"]), ("washer ^ head", W0["washer"], W0["head"]), ("washer ^ pinion", W0["washer"], W0["pinion"])] if P["use_washer"] else []))
+    # clip must sit just above the hub: report the gap
+    hub_top = g.head_z() + P["hub_h"]; groove = P["head_under"] + P["head_t"] + P["clip_groove_above"]
+    print(f"  hub top (world) = {hub_top:.2f}, clip groove bottom = {groove:.2f} -> clip clearance above the hub = {groove - hub_top:.2f} mm")
     # gear mesh + bushing over a full pan turn
     print("\n== pan sweep (gear mesh, bushing, pod/base) 0..360")
     worst = 0.0
