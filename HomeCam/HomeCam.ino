@@ -180,8 +180,8 @@ inline void statusLED(uint8_t r, uint8_t g, uint8_t b) {
 static inline uint32_t usToDuty(int us) {
   if (us < SERVO_MIN_US) us = SERVO_MIN_US;
   if (us > SERVO_MAX_US) us = SERVO_MAX_US;
-  // 16-bit resolution, 50 Hz => full scale (65536) == 20000 us period
-  return (uint32_t)(((uint64_t)us * 65536ULL) / 20000ULL);
+  // 14-bit resolution (ESP32-S3 LEDC max), 50 Hz => full scale 16384 == 20000 us
+  return (uint32_t)(((uint64_t)us * 16384ULL) / 20000ULL);
 }
 
 void servoSetup() {
@@ -189,10 +189,11 @@ void servoSetup() {
   memset(&tcfg, 0, sizeof(tcfg));
   tcfg.speed_mode      = LEDC_LOW_SPEED_MODE;
   tcfg.timer_num       = SERVO_LEDC_TIMER;
-  tcfg.duty_resolution = LEDC_TIMER_16_BIT;
+  tcfg.duty_resolution = LEDC_TIMER_14_BIT;   // ESP32-S3 LEDC is 14-bit MAX (not 16)
   tcfg.freq_hz         = 50;
   tcfg.clk_cfg         = LEDC_AUTO_CLK;
-  ledc_timer_config(&tcfg);
+  esp_err_t terr = ledc_timer_config(&tcfg);
+  if (terr != ESP_OK) Serial.printf("[SERVO] timer config failed: 0x%x\n", terr);
 
   ledc_channel_config_t ccfg;
   memset(&ccfg, 0, sizeof(ccfg));
@@ -335,15 +336,24 @@ void radarPoll(Radar& r) {
 void guardUpdate(uint32_t now) {
   if (g_mode != 1) { holdUntil = 0; return; }
 
-  bool l = radarL.present;
-  bool r = radarR.present;
+  // Only a MOVING detection (LD2410 state 1 or 3) should steer & hold the
+  // camera. A stationary object (chair, pet, someone standing still) keeps
+  // reporting present (state 2) and would otherwise park the sweep forever.
+  bool l = radarL.present && (radarL.state == 1 || radarL.state == 3);
+  bool r = radarR.present && (radarR.state == 1 || radarR.state == 3);
 
   if (l || r) {
     // Point toward the stronger / only hit. Left radar -> pan to the MIN side.
     int target;
     if (l && r) {
-      target = (radarL.movEng + radarL.statEng) >= (radarR.movEng + radarR.statEng)
-               ? PAN_MIN_DEG + 15 : PAN_MAX_DEG - 15;
+      // Latch the chosen side; only switch when the other wins by a clear
+      // margin, so frame-to-frame energy jitter can't flip us every tick.
+      static int guardSide = 0;  // -1 = left, +1 = right
+      int el = radarL.movEng + radarL.statEng;
+      int er = radarR.movEng + radarR.statEng;
+      if (guardSide <= 0 && er > el + 15)      guardSide = 1;
+      else if (guardSide >= 0 && el > er + 15) guardSide = -1;
+      target = (guardSide < 0) ? PAN_MIN_DEG + 15 : PAN_MAX_DEG - 15;
     } else if (l) {
       target = PAN_MIN_DEG + 15;
     } else {
