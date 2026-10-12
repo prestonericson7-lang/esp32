@@ -98,7 +98,8 @@ plastic) and its header rows run 8 mm longer than the real board's (they graze a
    above the hub, from the side.
 4. **Radars.** Each LD2410C slides down into its holder from the top, antenna side (the two square
    copper patches) facing **out**, header edge at the **bottom**, so the Dupont housings lie flat on the
-   plate pointing back towards the middle. A drop of hot glue on the top edge if you want.
+   plate pointing back towards the middle. Put a drop of hot glue on the top edge: nothing else holds
+   the board in if the unit is mounted upside down or gets knocked.
 5. **Board into the pod.** Stick the camera head onto the ESP32 module can with foam tape so the lens
    barrel goes through the Ø8 hole in the front wall (9.4 × 9.4 recess for the square head). Board in
    with the component side towards the front wall (module against the wall, thermal pad there),
