@@ -21,10 +21,11 @@ def print_oriented():
     pin, _ = g.part_pin()
     pinion, _ = g.part_pinion()
     clip = g.part_clip()
+    washer = g.part_washer()
     out = []
     for name, m in (("1 Base plate + hollow post", base), ("2 Pan head (yoke + radar holders)", head),
                     ("3 Camera pod (lens face down)", pod), ("4 Pod back cover (outer face down)", cover),
-                    ("5 Pivot pin (print 2 spares)", pin), ("6 Pan pinion 28T", pinion), ("7 Post C-clip (print 2 spares)", clip)):
+                    ("5 Pivot pin (print 2 spares)", pin), ("6 Pan pinion 28T", pinion), ("7 Post C-clip (print 2 spares)", clip), ("8 Spacer washer 2mm", washer)):
         tm = to_trimesh(m)
         lo, hi = tm.bounds
         tm.apply_translation([-(lo[0] + hi[0]) / 2, -(lo[1] + hi[1]) / 2, -lo[2]])
@@ -41,8 +42,9 @@ LAYOUT = {
     "5 Pivot pin (print 2 spares)": (1, 172.0, 42.0),
     "7 Post C-clip (print 2 spares)": (1, 160.0, 68.0),
     "2 Pan head (yoke + radar holders)": (2, 90.0, 95.0),
+    "8 Spacer washer 2mm": (1, 30.0, 106.0),
 }
-PLATE_NAMES = {1: "Plate 1 - base, pod, cover, pinion, pin, clip", 2: "Plate 2 - pan head"}
+PLATE_NAMES = {1: "Plate 1 - base, pod, cover, pinion, pin, clip, washer", 2: "Plate 2 - pan head (tall)"}
 
 def mesh_xml(obj_id, tm):
     v = tm.vertices; f = tm.faces
