@@ -90,16 +90,19 @@ P = dict(
     cav_x=36.0, cav_z=15.5,          # half extents of cavity
     cover_t=2.5, lip_t=1.2, lip_h=3.0, lip_clear=0.15,
     axis_y=5.0,                      # tilt axis behind pod depth centre
-    lens_hole_d=8.0, cam_recess=9.4, cam_recess_depth=1.5,
+    lens_hole_d=9.0, cam_recess=10.0, cam_recess_depth=1.5,
     usb_y0=-15.5, usb_y1=-7.5, usb_z=12.5,
     boss_l_r=9.0, boss_l_h=5.0, boss_r_r=6.0, boss_r_h=3.0,
-    post_d=5.0, post_x=28.0, post_z=12.0, post_mod_d=3.5, post_mod_x=-31.8,
+    post_d=4.0, post_mod_d=3.5, post_mod_x=-31.8,
+    # board mounting holes (measured off the product photo, scale checked on the USB-C shells): two at the USB
+    # end only, O3.1, 3.0 from the USB edge, 24.2 apart.  Locating pegs: one round, one flattened in Z.
+    hole_d=3.1, hole_from_end=3.0, hole_z=12.1, peg_d=2.4, peg_flat=1.4, peg_h=1.8, block_margin=1.5,
     cover_slot_w=14.0, cover_slot_h=3.6,   # wire slots through the cover's back face (5-pin Dupont passes)
 
     # ---- ESP32-S3-CAM board (68 x 29 incl. module overhang) ----
-    pcb_L=63.7, pcb_W=29.0, pcb_t=1.6, mod_L=25.5, mod_W=18.0, mod_h=3.2, mod_overhang=4.3,
+    pcb_L=63.6, pcb_W=27.6, pcb_t=1.6, mod_L=25.5, mod_W=18.0, mod_h=3.2, mod_overhang=4.4,
     hdr_edge=1.3, hdr_t=2.5, pin_len=6.0, hdr_z0=2.3, hdr_z1=52.0,
-    usb_w=9.0, usb_h=3.2, usb_depth=7.0, usb_cc=11.6, plug_w=12.0, plug_h=6.6, plug_len=30.0,
+    usb_w=9.0, usb_h=3.2, usb_depth=7.0, usb_cc=10.6, plug_w=12.0, plug_h=6.6, plug_len=30.0,
     cam_base=8.0, cam_base_t=1.9, cam_barrel_d=6.4, cam_barrel_h=4.3, lens_from_mod_end=18.4,
     mod_gap=1.2,                     # module can -> front wall inner face (thermal pad)
 )
@@ -305,6 +308,9 @@ def esp32cam_ghost():
     y_pcb_top = y_mod_top + P["mod_h"]
     y_pcb_bot = y_pcb_top + t
     pcb = box(x_pcb0, x_pcb1, y_pcb_top, y_pcb_bot, -W / 2, W / 2)
+    x_hole = x_pcb1 - P["hole_from_end"]
+    for sz in (-1, 1):
+        pcb -= cyl_y(P["hole_d"] / 2, y_pcb_top - 1, y_pcb_bot + 1, x_hole, sz * P["hole_z"], seg=SEG_SMALL)
     module = box(x_mod_end, x_mod_end + P["mod_L"], y_mod_top, y_pcb_top, -P["mod_W"] / 2, P["mod_W"] / 2)
     he = P["hdr_edge"]
     hz0 = x_pcb0 + P["hdr_z0"]; hz1 = x_pcb0 + P["hdr_z1"]
@@ -332,7 +338,8 @@ def esp32cam_ghost():
     parts = box(x_pcb0 + 6, x_pcb1 - 9, y_pcb_top - 4.0, y_pcb_top, -W / 2 + 4, W / 2 - 4)
     return dict(pcb=pcb, module=module, hdr=hdr, pins=pins, housings=hous, bumps=bumps, usb=usb, plugs=plugs,
                 cam=union(cam_base, barrel), parts=parts,
-                lens_x=xl, y_pcb_top=y_pcb_top, y_pcb_bot=y_pcb_bot, y_mod_top=y_mod_top, x_pcb1=x_pcb1, x_mod_end=x_mod_end)
+                lens_x=xl, y_pcb_top=y_pcb_top, y_pcb_bot=y_pcb_bot, y_mod_top=y_mod_top, x_pcb1=x_pcb1, x_mod_end=x_mod_end,
+                x_hole=x_hole, y_front_in=y_front_in)
 
 # --------------------------------------------------------------------------
 # PART 1: base plate + fixed hollow post with the 20T gear   (print: plate down)
@@ -529,6 +536,17 @@ def part_pod():
     r = P["cam_recess"] / 2
     pod -= box(xl - r, xl + r, y_in - P["cam_recess_depth"], y_in + 1, -r, r)
     pod -= box(cx - 1, L / 2 + 1, P["usb_y0"], P["usb_y1"], -P["usb_z"], P["usb_z"])
+    # board locating blocks in the two USB-end corners of the cavity, standing on the front wall, top at the
+    # PCB's component face, with a peg through each mounting hole (round one at +z, flattened one at -z)
+    xh = g["x_hole"]; yt = g["y_pcb_top"]; hz = P["hole_z"]
+    for sz in (-1, 1):
+        z_in = hz - P["block_margin"]
+        # block stops 1.4 mm short of the end wall so a USB-C overmold (12 wide) clears it
+        pod += box(xh - 3.0, xh + 3.0, y_in - 0.5, yt, min(sz * z_in, sz * (cz + 0.5)), max(sz * z_in, sz * (cz + 0.5)))
+        if sz > 0:
+            pod += cyl_y(P["peg_d"] / 2, yt - 0.01, yt + P["peg_h"], xh, sz * hz, seg=SEG_SMALL)
+        else:
+            pod += rrect(P["peg_d"], P["peg_flat"], P["peg_flat"] / 2 - 0.01).translate([xh, sz * hz]).extrude(P["peg_h"] + 0.01).rotate([-90, 0, 0]).translate([0, yt - 0.01, 0])
     yg0, yg1 = D / 2 - P["cover_t"] - P["lip_h"], D / 2 - P["cover_t"] - P["lip_h"] + 1.8
     for sx in (-1, 1):
         for sz in (-1, 1):
@@ -575,7 +593,9 @@ def part_cover():
     # board retention posts
     g = esp32cam_ghost()
     for sz in (-1, 1):
-        cover += cyl_y(P["post_d"] / 2, g["y_pcb_bot"] + 0.3, y0 + 0.01, P["post_x"], sz * P["post_z"], SEG_SMALL)
+        post = cyl_y(P["post_d"] / 2, g["y_pcb_bot"] + 0.1, y0 + 0.01, g["x_hole"], sz * P["hole_z"], SEG_SMALL)
+        post -= cyl_y(P["peg_d"] / 2 + 0.4, g["y_pcb_bot"] - 1, g["y_pcb_bot"] + 0.9, g["x_hole"], sz * P["hole_z"], SEG_SMALL)
+        cover += post
     cover += cyl_y(P["post_mod_d"] / 2, g["y_pcb_top"] + 0.3, y0 + 0.01, P["post_mod_x"], 0, SEG_SMALL)
     return cover
 
