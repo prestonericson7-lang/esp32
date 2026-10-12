@@ -175,6 +175,7 @@ struct Radar {
   volatile uint16_t detDist;    // cm
   volatile bool     present;
   volatile uint32_t lastFrameMs;
+  volatile uint32_t frames;     // total valid frames decoded (0 = radar not wired/powered)
   // edge/log bookkeeping
   bool     prevPresent;
   uint32_t lastLogMs;
@@ -316,6 +317,7 @@ void radarDecode(Radar& r) {
   r.detDist  = (uint16_t)r.payload[9]  | ((uint16_t)r.payload[10] << 8);
   r.present  = (r.state != 0);
   r.lastFrameMs = millis();
+  r.frames++;
 
   // Logging: appear / disappear edges, plus throttled "still moving"
   uint32_t now = millis();
@@ -591,14 +593,20 @@ a{color:var(--acc)}
 <script>
 var H=location.hostname;
 var imgs=[document.getElementById('vid'),document.getElementById('vid2')];
-var cur=0, mode='snap', busy=false, gen=0;
+var cur=0, mode='snap', busy=false, gen=0, lastReq=0;
+var FRAME_MIN_MS=66;   // cap the snapshot rate (~15fps) so the feed CANNOT starve the controls
 function capURL(){return 'http://'+H+':81/capture?x='+Date.now();}
 function pump(){
  if(mode!=='snap'||busy) return;
- busy=true; var g=++gen; var nxt=imgs[1-cur];
+ var wait=FRAME_MIN_MS-(Date.now()-lastReq); if(wait<0) wait=0;
+ setTimeout(doPump, wait);
+}
+function doPump(){
+ if(mode!=='snap'||busy) return;
+ busy=true; lastReq=Date.now(); var g=++gen; var nxt=imgs[1-cur];
  nxt.onload=function(){ busy=false; if(g!==gen||mode!=='snap') return;
   nxt.style.opacity=1; imgs[cur].style.opacity=0; cur=1-cur; pump(); };
- nxt.onerror=function(){ busy=false; if(mode==='snap') setTimeout(pump,120); };
+ nxt.onerror=function(){ busy=false; if(mode==='snap') setTimeout(pump,200); };
  nxt.src=capURL();
 }
 function setMode(m){
@@ -626,7 +634,9 @@ document.getElementById('guardBtn').onclick=function(){cmd('guard='+(document.ge
 document.getElementById('clr').onclick=function(){cmd('clearlog=1');};
 function stxt(s){return s==1?'moving':s==2?'still':s==3?'moving':'clear';}
 function upd(p,o){var d=document.getElementById(p+'dot'),v=document.getElementById(p+'v');
- if(o&&o.present){d.className='dot on';v.textContent=stxt(o.st)+' '+o.d+'cm';}else{d.className='dot';v.textContent='clear';}}
+ if(!o||!o.rx){d.className='dot';v.style.color='#e5534b';v.textContent='no data ✗';return;}
+ v.style.color='';
+ if(o.present){d.className='dot on';v.textContent=stxt(o.st)+' '+o.d+'cm';}else{d.className='dot';v.textContent='clear';}}
 function ago(t,now){var s=Math.max(0,Math.round((now-t)/1000));return s<1?'now':(s<60?s+'s':Math.floor(s/60)+'m')+' ago';}
 function bars(rssi){var n=rssi>=-60?4:rssi>=-70?3:rssi>=-80?2:1;var s='';for(var k=0;k<4;k++){var ht=4+k*3;s+='<i style="height:'+ht+'px;background:'+(k<n?'#2ea043':'#555')+'"></i>';}return s;}
 function poll(){fetch('/status').then(function(r){return r.json();}).then(function(j){
@@ -733,9 +743,11 @@ esp_err_t status_handler(httpd_req_t* req) {
   out += ",\"res\":\""; out += g_resLabel; out += "\"";
 
   out += ",\"left\":{\"present\":";  out += radarL.present ? "true" : "false";
-  out += ",\"st\":"; out += radarL.state; out += ",\"d\":"; out += radarDistance(radarL); out += "}";
+  out += ",\"st\":"; out += radarL.state; out += ",\"d\":"; out += radarDistance(radarL);
+  out += ",\"rx\":"; out += radarL.frames; out += "}";
   out += ",\"right\":{\"present\":"; out += radarR.present ? "true" : "false";
-  out += ",\"st\":"; out += radarR.state; out += ",\"d\":"; out += radarDistance(radarR); out += "}";
+  out += ",\"st\":"; out += radarR.state; out += ",\"d\":"; out += radarDistance(radarR);
+  out += ",\"rx\":"; out += radarR.frames; out += "}";
 
   out += ",\"log\":[";
   for (int i = 0; i < n; i++) {
@@ -922,6 +934,17 @@ void loop() {
     uint32_t f = g_servedFrames;
     g_fps = (float)(f - lastFrames) * 1000.0f / (float)(now - lastFpsMs);
     lastFrames = f; lastFpsMs = now;
+  }
+
+  // Radar heartbeat on Serial: if rx counts stay 0, the LD2410 TX pin is not
+  // wired to the ESP pin / the radar isn't powered. If rx climbs but state
+  // stays 0, the radar works but sees nothing (placement/sensitivity).
+  static uint32_t lastRadarDbg = 0;
+  if (now - lastRadarDbg >= 2000) {
+    lastRadarDbg = now;
+    Serial.printf("[RADAR] L rx=%u state=%d %dcm | R rx=%u state=%d %dcm\n",
+                  radarL.frames, radarL.state, radarDistance(radarL),
+                  radarR.frames, radarR.state, radarDistance(radarR));
   }
 
   // Status LED: amber in guard mode, green otherwise (only when connected).
