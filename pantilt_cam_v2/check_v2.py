@@ -28,7 +28,7 @@ def world_parts(tilt=0.0, pan=0.0):
     # pinion: the servo on the head keeps it at a fixed place in the head frame; it spins about its own
     # axis by -pan * (base_T / pin_T) ... for the mesh check we rotate it by the correct rolling angle.
     # planet rolling round a fixed sun: relative to the carrier (head) it turns +pan * N_sun/N_planet
-    roll = P["pinion_phase"] + pan * (P["gear_base_T"] / P["gear_pin_T"])
+    roll = g.pinion_phase_deg() + pan * (P["gear_base_T"] / P["gear_pin_T"])
     W["pinion"] = H(g.pinion_in_head()(pinion.rotate([0, 0, roll])))
     W["clip"] = H(g.clip_in_head()(clip))
     return W
@@ -58,6 +58,8 @@ def ghosts(tilt=0.0, pan=0.0):
         G["esp_" + k] = H(f(e[k]))
     # power wires coming up the post: a Ø4 flexible pair up the bore, then out of the side slot
     G["post_wires"] = cyl_z(2.0, -3, P["head_under"] + P["head_t"] + P["hub_h"] + 6, seg=24)
+    # a USB-C plug going up the bore (12 x 6.6) must also pass
+    G["post_plug"] = box(-6.0, 6.0, -3.3, 3.3, -3, P["head_under"] + P["head_t"] + P["post_top_above"] - 2)
     return G
 
 def cyl_z(r, z0, z1, x=0.0, y=0.0, seg=48):
@@ -141,6 +143,9 @@ if __name__ == "__main__":
         ("post wires ^ base (bore)", G["post_wires"], W0["base"]),
         ("post wires ^ head (hub bore)", G["post_wires"], W0["head"]),
         ("post wires ^ clip", G["post_wires"], W0["clip"]),
+        ("USB-C plug up the bore ^ base", G["post_plug"], W0["base"]),
+        ("USB-C plug up the bore ^ head", G["post_plug"], W0["head"]),
+        ("USB-C plug up the bore ^ clip", G["post_plug"], W0["clip"]),
         ("tilt servo body ^ head", G["tilt_servo_body"], W0["head"]),
         ("tilt servo body ^ pod", G["tilt_servo_body"], W0["pod"]),
         ("tilt servo spline(4.6) ^ pod", G["tilt_servo_spline"], W0["pod"]),

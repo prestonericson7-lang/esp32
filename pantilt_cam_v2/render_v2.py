@@ -140,20 +140,20 @@ if __name__ == "__main__":
                    ("pin column + printed pivot pin", (50, 0, tz), (120, -140)),
                    ("hollow post: power wires come up through it", (0, 0, hz + 8), (-120, 200)),
                    ("base plate 100x80x4, 4x M4 holes", (45, 35, 0), (60, 120))])
-    render(scene(0, 0), os.path.join(OUT, "fig2_assembled_rear.png"), az=145, el=25, title="rear-left view: pan servo on the head drives the 40T pinion round the fixed 20T gear; leads leave through the cover's back slots",
+    render(scene(0, 0), os.path.join(OUT, "fig2_assembled_rear.png"), az=145, el=25, title="rear-left view: pan servo on the head drives the 28T pinion round the fixed 28T sun gear; leads leave through the cover's back slots",
            labels=[("cover: 3 wire slots through the back face", (0, 17.5, tz - 7), (-300, -170)),
                    ("MG90S pan servo, shaft down through the plate", (5, 30, hz + 12), (120, -120)),
-                   ("40T pinion under the plate", (0, 30, hz - 8), (160, 60)),
+                   ("28T pinion under the plate", (0, 30, hz - 8), (160, 60)),
                    ("C-clip keeps the head on the post (ceiling mount)", (0, 0, hz + 9), (-380, 120))])
     render(scene(0, 0), os.path.join(OUT, "fig3_front.png"), az=0, el=0, title="front view (what a visitor sees): lens left of centre, radars at the plate corners")
     render(scene(45, 0), os.path.join(OUT, "fig4_side_tilt45.png"), az=-90, el=0, title="right side (pin column), tilt +45deg = camera looking down; pod clears post, plate and radar holders")
     render(scene(-45, 0), os.path.join(OUT, "fig4b_side_tilt-45.png"), az=-90, el=0, title="right side, tilt -45deg = camera looking up")
-    render(scene(0, 0, explode=22), os.path.join(OUT, "fig5_exploded.png"), az=-35, el=22, title="exploded: base+post / pinion / head / clip / pod+board / cover / pin  (servos + radars as ghosts)")
+    render(scene(0, 0, explode=22), os.path.join(OUT, "fig5_exploded.png"), az=-35, el=22, title="exploded: base+post+sun gear / pinion / head / clip / pod+board / cover / pin  (servos + radars as ghosts)")
     render(scene(0, 0, with_cover=False, parts=("pod",)), os.path.join(OUT, "fig6_pod_open_back.png"), az=180, el=0,
            title="pod from the back, cover off: board lies on its module against the front wall, header pins point at you")
     render(scene(0, 0, parts=("head", "pinion", "clip")), os.path.join(OUT, "fig7_head_top.png"), az=0, el=89, title="pan head from above (front = bottom of picture): servo wall left, pin column right, pan servo at the back, radars +/-45deg")
-    render(scene(0, 0, parts=("base", "pinion", "clip"), with_ghosts=False), os.path.join(OUT, "fig8_base.png"), az=-30, el=35, title="base: hollow post with the fixed 20T gear, thrust collar, C-clip groove, side wire slot; pinion shown meshed")
+    render(scene(0, 0, parts=("base", "pinion", "clip"), with_ghosts=False), os.path.join(OUT, "fig8_base.png"), az=-30, el=35, title="base: O30 hollow journal post with the 28T sun gear, flat thrust ring, C-clip groove, top wire slot; pinion meshed")
     render(scene(0, 0, parts=("base", "head", "pinion", "clip"), with_ghosts=True), os.path.join(OUT, "fig9_head_underside.png"), az=160, el=-35,
            title="from below/behind: pinion on the pan servo meshing with the post gear; wires up the bore")
-    render(scene(0, 180), os.path.join(OUT, "fig10_pan180.png"), az=-35, el=25, title="pan = 180deg (servo at 90 of its 180): the head has turned half way round the fixed post")
+    render(scene(0, 180), os.path.join(OUT, "fig10_pan180.png"), az=-35, el=25, title="pan = 180deg (1:1, servo at 180): the head has turned half way round the fixed post")
     print("done")
