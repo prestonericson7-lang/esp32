@@ -84,7 +84,7 @@ P = dict(
     rad_L=22.0, rad_H=16.0, rad_pcb_t=1.6, rad_groove_w=2.0, rad_groove_eng=1.2,
     rad_rail_w=4.0, rad_rail_t=5.0, rad_ledge_h=3.0, rad_rail_h=20.0,
     rad_pin_edge=1.7,                # pin row from header edge
-    head_main=(-58.0, 53.0, -34.0, 58.0),   # x0,x1,y0,y1 of main plate
+    head_main=(-61.0, 53.0, -34.0, 58.0),   # x0,x1,y0,y1 of main plate (covers the 10 mm outboard gussets)
     wing=30.0,
 
     # ---- camera pod ----
