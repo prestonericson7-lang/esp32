@@ -48,31 +48,33 @@ P = dict(
     # face sits (8.5 - ear_t) = 6.0 past that surface; spline 6.5..9.9, dome top 6.1 past it.
     seat_to_face=8.5,
 
-    # ---- base plate + fixed hollow post with the fixed 20T gear ----
+    # ---- base plate + fixed hollow post (journal) with the fixed sun gear ----
     base_x=100.0, base_y=80.0, base_t=4.0,
     base_hole_d=4.5, base_cb_d=9.0, base_cb_depth=1.5, base_hole_inset=8.0,
-    head_under=20.0,                 # world Z of the head plate underside (= collar top, thrust face)
-    post_od=13.0, post_bore=9.0,     # hollow pivot post
+    head_under=20.0,                 # world Z of the head plate underside = thrust face (top of the sun flange)
+    post_od=30.0, post_bore=18.0,    # hollow journal post; a USB-C plug (12 x 6.6) passes the bore
     post_top_above=14.0,             # post top above the head plate top
-    collar_d=17.5, collar_h=0.4,     # smooth thrust collar under the head (inside the pinion's reach)
-    gear_m=1.0, gear_base_T=20, gear_pin_T=40, gear_pa=20.0, gear_backlash=0.2,
-    gear_h=13.0,                     # fixed gear face width (top at collar bottom)
-    foot_d=40.0, foot_h=6.5,         # cone foot of the post on the base plate (ends at the gear tip dia)
-    cable_slot_w=6.0, cable_slot_h=6.0,
+    gear_m=1.5, gear_base_T=28, gear_pin_T=28, gear_pa=20.0, gear_backlash=0.15,
+    gear_cd_extra=0.1,               # extra centre distance for printed gears
+    gear_h=10.5,                     # sun face width; teeth top 0.5 below the thrust face
+    gear_root_fillet=0.45, gear_tip_round=0.2,
+    foot_d=60.0, foot_h=9.0,         # cone foot under the sun flange
+    cable_slot_w=13.0, cable_slot_h=7.5,   # side entry into the bore (USB-C plug passes)
     bush_clear=0.2,                  # radial clearance head bore / post
-    clip_t=1.5, clip_groove_d=10.6, clip_play=0.3, clip_od=18.0,
+    clip_t=1.5, clip_groove_d=27.0, clip_play=0.3, clip_od=35.0,
+    thrust_ring_w=4.0,               # smooth annulus on the sun flange top, from the post outwards
+    magnet_d=8.2, magnet_h=5.0, home_r=30.0,   # optional reed-switch homing: magnet in head, switch in base
 
     # ---- pan head (yoke plate) ----
     head_t=4.5,
-    hub_od=22.0, hub_h=8.0,          # bushing tube above the plate
-    tilt_z=45.0,                     # tilt axis above head plate top
-    wall_t=3.0, wall_w=28.0, wall_h=57.0, wall_x=-49.5,   # wall_x = wall OUTER face (tilt servo ear TOP lands here)
-    col_x0=43.0, col_x1=50.0, col_y_back=16.0, col_y_front=-6.0, col_top=51.0,
+    hub_od=36.0, hub_h=8.0,          # bushing tube above the plate (bore = post + 2*bush_clear)
+    tilt_z=48.0,                     # tilt axis above head plate top
+    wall_t=3.0, wall_w=28.0, wall_h=60.0, wall_x=-49.5,   # wall_x = wall OUTER face (tilt servo ear TOP lands here)
+    col_x0=43.0, col_x1=50.0, col_y_back=16.0, col_y_front=-6.0, col_top=54.0,
     col_slope_h=10.0,                # 45 deg lean-forward below the pin hole
-    pin_d=4.8, pin_hole_col=4.9, pin_hole_pod=5.2, pin_head_d=8.0, pin_head_t=2.5,
-    pan_srv_x=0.0, pan_srv_y=30.0,   # pan servo SHAFT position on the head (= centre distance 30, on a base-gear tooth line)
-    pinion_phase=4.5,                # pinion rotated half a tooth so a gap faces the base gear's tooth at pan 0
-    pinion_t=7.0, pinion_top_gap=0.5,  # pinion top face below the plate underside
+    pin_d=6.0, pin_hole_col=6.1, pin_hole_pod=6.4, pin_head_d=10.0, pin_head_t=2.5,
+    pan_srv_tooth=10,                # pan servo shaft sits on sun tooth line number k (angle k*360/N_sun)
+    pinion_t=8.0, pinion_top_gap=0.5,  # pinion top face below the plate underside
     pan_pad_h=2.0,                   # raised pad under the pan servo ears (keeps 8 mm ear screws inside the plate)
     pinion_screw_groove=1.8,         # clearance grooves in the pinion top under the ear-screw tips
     radar_cx=54.0, radar_cy=-32.0, radar_yaw=45.0,
@@ -80,7 +82,7 @@ P = dict(
     rad_L=22.0, rad_H=16.0, rad_pcb_t=1.6, rad_groove_w=2.0, rad_groove_eng=1.2,
     rad_rail_w=4.0, rad_rail_t=5.0, rad_ledge_h=3.0, rad_rail_h=20.0,
     rad_pin_edge=1.7,                # pin row from header edge
-    head_main=(-58.0, 53.0, -34.0, 53.0),   # x0,x1,y0,y1 of main plate
+    head_main=(-58.0, 53.0, -34.0, 58.0),   # x0,x1,y0,y1 of main plate
     wing=30.0,
 
     # ---- camera pod ----
@@ -90,7 +92,7 @@ P = dict(
     axis_y=5.0,                      # tilt axis behind pod depth centre
     lens_hole_d=8.0, cam_recess=9.4, cam_recess_depth=1.5,
     usb_y0=-15.5, usb_y1=-7.5, usb_z=12.5,
-    boss_l_r=9.0, boss_l_h=5.0, boss_r_r=5.0, boss_r_h=3.0,
+    boss_l_r=9.0, boss_l_h=5.0, boss_r_r=6.0, boss_r_h=3.0,
     post_d=5.0, post_x=28.0, post_z=12.0, post_mod_d=3.5, post_mod_x=-31.8,
     cover_slot_w=14.0, cover_slot_h=3.6,   # wire slots through the cover's back face (5-pin Dupont passes)
 
@@ -230,7 +232,28 @@ def involute_gear_cs(m, N, pa_deg=20.0, backlash=0.0, flank_pts=10, addendum=1.0
     return poly(pts), dict(rp=rp, ra=ra, rf=rf, rb=rb)
 
 def gear_centre_distance():
-    return P["gear_m"] * (P["gear_base_T"] + P["gear_pin_T"]) / 2.0
+    return P["gear_m"] * (P["gear_base_T"] + P["gear_pin_T"]) / 2.0 + P["gear_cd_extra"]
+
+def pan_servo_xy():
+    """pan servo shaft position on the head: on sun tooth line k, at the centre distance"""
+    a = math.radians(P["pan_srv_tooth"] * 360.0 / P["gear_base_T"])
+    c = gear_centre_distance()
+    return c * math.cos(a), c * math.sin(a)
+
+def pinion_phase_deg():
+    """pinion rotation (about its own axis, head frame) so that a tooth GAP faces the sun's tooth on the
+    line of centres at pan 0: tooth centres at phase + j*pitch, we want a gap at angle (theta_c + 180)."""
+    theta_c = P["pan_srv_tooth"] * 360.0 / P["gear_base_T"]
+    pitch = 360.0 / P["gear_pin_T"]
+    return (theta_c + 180.0 - pitch / 2.0) % pitch
+
+def finished_gear_cs(m, N):
+    """involute gear with root fillets and tip rounding (offset tricks), ready to extrude"""
+    cs, gi = involute_gear_cs(m, N, P["gear_pa"], P["gear_backlash"])
+    rf = P["gear_root_fillet"]; tr = P["gear_tip_round"]
+    cs = cs.offset(rf, JoinType.Round, 2.0, 16).offset(-rf, JoinType.Round, 2.0, 16)   # fill root corners
+    cs = cs.offset(-tr, JoinType.Round, 2.0, 16).offset(tr, JoinType.Round, 2.0, 16)   # round tips
+    return cs, gi
 
 # --------------------------------------------------------------------------
 # Ghost components (for clearance checks and renders) - NOT printed
@@ -324,30 +347,33 @@ def part_base():
             plate -= cyl_z(P["base_hole_d"] / 2, -bt - 1, 1, x, y, SEG_SMALL)
             plate -= cyl_z(P["base_cb_d"] / 2, -P["base_cb_depth"], 1, x, y, SEG_SMALL)
     zu = P["head_under"]
-    z_collar0 = zu - P["collar_h"]
-    z_gear0 = z_collar0 - P["gear_h"]
+    z_gear1 = zu - 0.5                       # teeth top 0.5 below the thrust face
+    z_gear0 = z_gear1 - P["gear_h"]
     z_top = zu + P["head_t"] + P["post_top_above"]
-    # plain post up to the top
-    post = cyl_z(P["post_od"] / 2, -0.01, z_top, seg=SEG)
-    # fixed gear + smooth collar
-    gcs, gi = involute_gear_cs(P["gear_m"], P["gear_base_T"], P["gear_pa"], P["gear_backlash"])
+    gcs, gi = finished_gear_cs(P["gear_m"], P["gear_base_T"])
+    # sun gear flange with the smooth thrust ring on top (post radius .. post radius + thrust_ring_w)
     gear = gcs.extrude(P["gear_h"]).translate([0, 0, z_gear0])
-    collar = cyl_z(P["collar_d"] / 2, z_collar0 - 0.01, zu, seg=SEG)
-    # cone foot: from foot_d at the plate to the gear root diameter just under the gear
-    foot = Manifold.cylinder(P["foot_h"] + 0.01, P["foot_d"] / 2, gi["ra"], SEG).translate([0, 0, -0.01])
-    body = plate + post + gear + collar + foot
+    thrust = cyl_z(P["post_od"] / 2 + P["thrust_ring_w"], z_gear1 - 0.01, zu, seg=SEG)
+    # journal post up to the top
+    post = cyl_z(P["post_od"] / 2, -0.01, z_top, seg=SEG)
+    # cone foot under the gear: foot_d at the plate -> gear root diameter at z_gear0
+    foot = Manifold.cylinder(P["foot_h"] + 0.01, P["foot_d"] / 2, gi["ra"] + 0.3, SEG).translate([0, 0, -0.01])   # supports the tooth bottoms
+    body = plate + post + gear + thrust + foot
     # hollow bore all the way, open at the top
-    body -= cyl_z(P["post_bore"] / 2, -bt - 1, z_top + 1, seg=SEG_SMALL)
-    # side slot at the top of the post (wires leave sideways, towards +Y = back), above the C-clip
+    body -= cyl_z(P["post_bore"] / 2, -bt - 1, z_top + 1, seg=SEG)
+    # side slot at the top of the post for thin leads (towards +Y = back), above the C-clip
     zs0 = zu + P["head_t"] + P["hub_h"] + P["clip_t"] + P["clip_play"] + 0.8
-    body -= box(-4.5, 4.5, 0, P["post_od"] / 2 + 1, zs0, z_top + 1)
+    body -= box(-7.0, 7.0, 0, P["post_od"] / 2 + 1, zs0, z_top + 1)
     # C-clip groove just above the hub
     zc0 = zu + P["head_t"] + P["hub_h"] + P["clip_play"]
     body -= (cyl_z(P["post_od"] / 2 + 1, zc0, zc0 + P["clip_t"] + 0.2, seg=SEG) - cyl_z(P["clip_groove_d"] / 2, zc0 - 1, zc0 + P["clip_t"] + 1, seg=SEG))
-    # cable entry: notch through the foot/post wall at plate level on the -Y side, into the bore
+    # cable entry: notch through the foot/gear/post wall at plate level on the -Y side, into the bore
     body -= box(-P["cable_slot_w"] / 2, P["cable_slot_w"] / 2, -P["foot_d"] / 2 - 1, 0, -bt + 1.5, P["cable_slot_h"])
     # and a hole straight down through the plate under the bore (for an under-plate feed)
-    body -= cyl_z(P["post_bore"] / 2, -bt - 1, 1, seg=SEG_SMALL)
+    body -= cyl_z(P["post_bore"] / 2, -bt - 1, 1, seg=SEG)
+    # optional reed switch slot (glass reed 2.5 x 14) in the plate top, under the head's magnet pocket
+    body -= box(-8.0, 8.0, -P["home_r"] - 1.6, -P["home_r"] + 1.6, -2.0, 1.0)
+    body -= box(-P["base_y"] / 2 - 1, -P["home_r"], -P["home_r"] - 1.2, -P["home_r"] + 1.2, -2.0, 1.0)
     return body
 
 # --------------------------------------------------------------------------
@@ -373,6 +399,9 @@ def radar_holder_local():
 def head_plate_outline():
     x0, x1, y0, y1 = P["head_main"]
     main = rrect(x1 - x0, y1 - y0, 6.0).translate([(x0 + x1) / 2, (y0 + y1) / 2])
+    # disc under the pinion's sweep around the pan servo
+    sx, sy = pan_servo_xy()
+    main = main + CrossSection.circle(P["gear_m"] * (P["gear_pin_T"] + 2) / 2 + 4.0, SEG).translate([sx, sy])
     w = P["wing"]
     wl = rrect(w, w, 4.0).rotate(-P["radar_yaw"]).translate([-P["radar_cx"], P["radar_cy"]])
     wr = rrect(w, w, 4.0).rotate(P["radar_yaw"]).translate([P["radar_cx"], P["radar_cy"]])
@@ -389,7 +418,7 @@ def pan_servo_window_cut():
     """cut for the pan servo dropped into the head plate from above, shaft DOWN, case along X,
     shaft at (pan_srv_x, pan_srv_y).  Includes the pilot slots (through the plate + bosses)."""
     L, W = P["pocket_L"], P["pocket_W"]
-    sx, sy = P["pan_srv_x"], P["pan_srv_y"]
+    sx, sy = pan_servo_xy()
     x0 = sx - P["srv_shaft_off"] - (L - P["srv_L"]) / 2
     x1 = x0 + L
     cut = box(x0, x1, sy - W / 2, sy + W / 2, -P["head_t"] - 1, 30)
@@ -406,10 +435,13 @@ def part_head(with_holders=True):
     head = plate + hub
     # raised pad under the pan servo ears, then the window + pilot slots through pad and plate
     cut, xc = pan_servo_window_cut()
+    sx, sy = pan_servo_xy()
     head += rrect_prism(xc - P["srv_ear_span"] / 2 - 1.0, xc + P["srv_ear_span"] / 2 + 1.0,
-                        P["pan_srv_y"] - P["srv_W"] / 2 - 1.0, P["pan_srv_y"] + P["srv_W"] / 2 + 1.0, -0.01, P["pan_pad_h"], 2.0)
+                        sy - P["srv_W"] / 2 - 1.0, sy + P["srv_W"] / 2 + 1.0, -0.01, P["pan_pad_h"], 2.0)
     head -= cut
     head -= cyl_z(P["post_od"] / 2 + P["bush_clear"], -t - 1, P["hub_h"] + 1, seg=SEG)
+    # optional homing magnet pocket in the underside (front centre)
+    head -= cyl_z(P["magnet_d"] / 2, -t - 1, -t + P["magnet_h"], 0, -P["home_r"], seg=SEG_SMALL)
     # ---- tilt servo wall (ears on OUTER face at x = wall_x) ----
     wx = P["wall_x"]; wt = P["wall_t"]; ww = P["wall_w"]; wh = P["wall_h"]; tz = P["tilt_z"]
     wall = box(wx, wx + wt, -ww / 2, ww / 2, -t + 0.5, wh)
@@ -448,7 +480,7 @@ def radar_transform(side):
 # pinion-local: z=0 bottom face (screw head side), top face at pinion_t with the spline socket
 # --------------------------------------------------------------------------
 def part_pinion():
-    tcs, gi = involute_gear_cs(P["gear_m"], P["gear_pin_T"], P["gear_pa"], P["gear_backlash"])
+    tcs, gi = finished_gear_cs(P["gear_m"], P["gear_pin_T"])
     h = P["pinion_t"]
     g = tcs.extrude(h)
     # spline socket from the top (the dome stays inside the plate window above the pinion)
@@ -459,10 +491,11 @@ def part_pinion():
     # centre screw hole + head recess from the bottom
     g -= cyl_z(P["screw_d"] / 2, -1, h, seg=SEG_SMALL)
     g -= cyl_z(2.6, -1, 1.5, seg=SEG_SMALL)
-    # lightening: 6 holes
+    # lightening: 6 holes between the hub and the rim
+    rr = (gi["rf"] + 7.0) / 2 + 1.0
     for k in range(6):
         a = math.radians(60 * k + 30)
-        g -= cyl_z(4.0, -1, h + 1, 13.5 * math.cos(a), 13.5 * math.sin(a), seg=SEG_SMALL)
+        g -= cyl_z(min(3.5, (gi["rf"] - 7.0) / 2 - 2.5), -1, h + 1, rr * math.cos(a), rr * math.sin(a), seg=SEG_SMALL)
     return g, gi
 
 # --------------------------------------------------------------------------
@@ -471,8 +504,8 @@ def part_pinion():
 def part_clip():
     t = P["clip_t"]
     ring = cyl_z(P["clip_od"] / 2, 0, t, seg=SEG) - cyl_z(P["clip_groove_d"] / 2 + 0.05, -1, t + 1, seg=SEG)
-    # opening: remove a 130 deg sector (chord 9.6 mm < 10.6 groove) so it snaps on sideways
-    ang = 65.0
+    # opening: remove a 140 deg sector so it snaps on sideways over the groove
+    ang = 70.0
     opening = poly([[0, 0], [30 * math.cos(math.radians(-90 - ang)), 30 * math.sin(math.radians(-90 - ang))],
                     [0, -40], [30 * math.cos(math.radians(-90 + ang)), 30 * math.sin(math.radians(-90 + ang))]]).extrude(t + 2).translate([0, 0, -1])
     return ring - opening
@@ -571,11 +604,13 @@ def pod_in_head(tilt_deg=0.0):
 def pinion_in_head():
     """pinion-local (bottom face z=0) -> head-local: hangs under the plate on the pan servo spline"""
     ztop = -P["head_t"] - P["pinion_top_gap"]
-    return lambda m: m.translate([P["pan_srv_x"], P["pan_srv_y"], ztop - P["pinion_t"]])
+    sx, sy = pan_servo_xy()
+    return lambda m: m.translate([sx, sy, ztop - P["pinion_t"]])
 
 def pan_servo_in_head():
     """servo-local (ear underside z=0, shaft +Z) -> head-local: shaft DOWN, ear TOP on the plate top"""
-    return lambda m: m.rotate([180, 0, 0]).translate([P["pan_srv_x"], P["pan_srv_y"], P["srv_ear_t"] + P["pan_pad_h"]])
+    sx, sy = pan_servo_xy()
+    return lambda m: m.rotate([180, 0, 0]).translate([sx, sy, P["srv_ear_t"] + P["pan_pad_h"]])
 
 def clip_in_head():
     """clip-local (z=0 bottom) -> head-local: sits in the post groove just above the hub"""
@@ -599,4 +634,4 @@ if __name__ == "__main__":
         print(f"{k:6s} status={m.status()} tris={m.num_tri():6d} vol={m.volume():9.0f} mm3  bbox={np.round(tm.bounds,1).tolist()} watertight={tm.is_watertight}")
         tm.export(os.path.join(OUT, f"{k}.stl"))
     print("pin shank length", shank_len, " pinion rp/ra/rf", gi, " centre distance", gear_centre_distance(),
-          " servo radius", math.hypot(P["pan_srv_x"], P["pan_srv_y"]))
+          " servo at", [round(v, 2) for v in pan_servo_xy()], " pinion phase", round(pinion_phase_deg(), 3))
