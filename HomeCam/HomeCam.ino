@@ -19,8 +19,6 @@
 #include <ESPmDNS.h>
 #include "esp_http_server.h"
 #include "driver/ledc.h"
-#include "soc/soc.h"
-#include "soc/rtc_cntl_reg.h"
 
 /* ===========================================================================
    >>>>>>>>>>>>>>>>>>>>>>>  PUT YOUR WIFI INFO HERE  <<<<<<<<<<<<<<<<<<<<<<<<<<
@@ -727,8 +725,12 @@ void connectWiFi() {
    setup / loop
    ========================================================================== */
 void setup() {
-  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);   // camera+wifi current spikes trip
-                                               // a false brownout on these boards
+  // NOTE: deliberately NO brownout-detector register poke here. On the
+  // ESP32-S3 the classic WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0) trick is
+  // unreliable and is reported to reset the board before setup() even runs.
+  // A "Brownout detector was triggered" message means the 3.3V rail is dipping
+  // on the camera/WiFi inrush -> cure it with a solid 5V supply + a bulk
+  // capacitor on 5V (see the POWER / BROWNOUT notes at the bottom of this file).
   Serial.begin(115200);
   delay(300);
   Serial.println("\n== HomeCam booting ==");
@@ -805,4 +807,28 @@ void loop() {
      Upload Mode:      "UART0 / Hardware CDC"
    Plug the USB-C cable into the port labelled "TTL" to upload.
    Open Serial Monitor at 115200 to see the IP address.
+   ============================================================================
+
+   POWER / "Brownout detector was triggered"  (boot loop, even with nothing
+   else wired up)
+   ----------------------------------------------------------------------------
+   This is NOT a code bug and NOT your servos/radars -- it is the camera's
+   current spike (OV3660 + WiFi) sagging the board's little 3.3V regulator
+   below its safe voltage, so the chip resets itself over and over. Fix the
+   power and it boots clean. In order of effectiveness:
+
+     1) Power it from a REAL 5V supply: a 5V / 2A (or better) phone wall
+        charger, NOT a PC/laptop USB port or hub, and use a SHORT, THICK,
+        data-capable USB-C cable (thin "charge-only" cables cause this).
+     2) Add a bulk capacitor: a 470uF-1000uF electrolytic between 5V and GND,
+        as close to the board as possible. It soaks up the inrush spike.
+        (Polarity matters: the striped leg is - and goes to GND.)
+     3) Reseat the camera ribbon -- a loose brown FFC connector also throws
+        this same error (and "camera probe failed").
+     4) If you power the 5V pin from your own supply, keep its GND tied to the
+        board GND, and you can leave the TTL USB plugged in just for Serial.
+
+   Secondary software mitigation (only if good power still isn't enough):
+     drop the camera clock on the "config.xclk_freq_hz = 20000000;" line to
+     10000000 (10 MHz). Lower clock = less inrush, slightly lower frame rate.
    ========================================================================== */
