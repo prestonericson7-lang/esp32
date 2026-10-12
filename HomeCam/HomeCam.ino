@@ -421,7 +421,11 @@ bool initCamera() {
   config.pin_pwdn  = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
-  config.frame_size   = DEFAULT_FRAMESIZE;
+  // Size the frame-buffer pool for the LARGEST resolution the UI can select
+  // (SVGA). esp_camera_init allocates the pool once; set_framesize() only
+  // down-switches the sensor, so every res button (QVGA/CIF/VGA/SVGA) then
+  // stays within this allocation. The no-PSRAM branch below forces QVGA.
+  config.frame_size   = FRAMESIZE_SVGA;
   config.pixel_format = PIXFORMAT_JPEG;
   config.grab_mode    = CAMERA_GRAB_LATEST;
   config.fb_location  = CAMERA_FB_IN_PSRAM;
