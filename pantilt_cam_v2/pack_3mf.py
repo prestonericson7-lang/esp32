@@ -19,10 +19,12 @@ def print_oriented():
     pod = g.part_pod().rotate([90, 0, 0]).translate([0, 0, P["pod_D"] / 2])          # front face down
     cover = g.part_cover().rotate([-90, 0, 0]).translate([0, 0, P["pod_D"] / 2])    # outer face down
     pin, _ = g.part_pin()
+    pinion, _ = g.part_pinion()
+    clip = g.part_clip()
     out = []
-    for name, m in (("1 Base plate + pan turret", base), ("2 Pan head (yoke + radar holders)", head),
+    for name, m in (("1 Base plate + hollow post", base), ("2 Pan head (yoke + radar holders)", head),
                     ("3 Camera pod (lens face down)", pod), ("4 Pod back cover (outer face down)", cover),
-                    ("5 Pivot pin (x1, print 2 spares)", pin)):
+                    ("5 Pivot pin (print 2 spares)", pin), ("6 Pan pinion 40T", pinion), ("7 Post C-clip (print 2 spares)", clip)):
         tm = to_trimesh(m)
         lo, hi = tm.bounds
         tm.apply_translation([-(lo[0] + hi[0]) / 2, -(lo[1] + hi[1]) / 2, -lo[2]])
@@ -32,13 +34,15 @@ def print_oriented():
 
 # plate layout: (plate index, x, y) of each object's centre on its plate
 LAYOUT = {
-    "1 Base plate + pan turret": (1, 52.0, 42.0),
-    "3 Camera pod (lens face down)": (1, 125.0, 142.0),
-    "4 Pod back cover (outer face down)": (1, 125.0, 102.0),
-    "5 Pivot pin (x1, print 2 spares)": (1, 150.0, 50.0),
+    "1 Base plate + hollow post": (1, 52.0, 42.0),
+    "3 Camera pod (lens face down)": (1, 125.0, 144.0),
+    "4 Pod back cover (outer face down)": (1, 125.0, 104.0),
+    "6 Pan pinion 40T": (1, 132.0, 50.0),
+    "5 Pivot pin (print 2 spares)": (1, 165.0, 72.0),
+    "7 Post C-clip (print 2 spares)": (1, 167.0, 30.0),
     "2 Pan head (yoke + radar holders)": (2, 90.0, 95.0),
 }
-PLATE_NAMES = {1: "Plate 1 - base, pod, cover, pin", 2: "Plate 2 - pan head"}
+PLATE_NAMES = {1: "Plate 1 - base, pod, cover, pinion, pin, clip", 2: "Plate 2 - pan head"}
 
 def mesh_xml(obj_id, tm):
     v = tm.vertices; f = tm.faces
@@ -60,7 +64,7 @@ def write_3mf(path, objs):
              ' <metadata name="BambuStudio:3mfVersion">1</metadata>\n',
              ' <metadata name="Copyright"></metadata>\n',
              f' <metadata name="CreationDate">{today}</metadata>\n',
-             ' <metadata name="Description">v2 pan/tilt: ESP32-S3-CAM pod, 2x MG90S, 2x LD2410C radar on the head. No STM32 box.</metadata>\n',
+             ' <metadata name="Description">v2.1 pan/tilt: ESP32-S3-CAM pod, 2x MG90S, 2x LD2410C on the head, hollow pan post with 2:1 gear drive.</metadata>\n',
              ' <metadata name="Designer"></metadata>\n <metadata name="DesignerCover"></metadata>\n <metadata name="DesignerUserId"></metadata>\n <metadata name="License"></metadata>\n',
              f' <metadata name="ModificationDate">{today}</metadata>\n',
              ' <metadata name="Origin"></metadata>\n <metadata name="Title">pantilt_cam_v2</metadata>\n <resources>\n']
@@ -129,6 +133,9 @@ def write_plain_3mf(path, objs):
 
 if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
+    for f in os.listdir(OUT):
+        if f.endswith("_print_oriented.stl"):
+            os.remove(os.path.join(OUT, f))
     objs = print_oriented()
     for name, tm in objs:
         plate, px, py = LAYOUT[name]
@@ -137,8 +144,7 @@ if __name__ == "__main__":
         ok = 0 <= x0 and x1 <= PLATE and 0 <= y0 and y1 <= PLATE
         print(f"plate {plate}  {name:38s} footprint x[{x0:6.1f},{x1:6.1f}] y[{y0:6.1f},{y1:6.1f}] h={hi[2]:5.1f}  {'OK' if ok else 'OUTSIDE BED!'}")
         assert ok
-        tm.export(os.path.join(OUT, name.split(" ")[1] + "_print_oriented.stl"))
-    # overlap check between footprints on the same plate
+        tm.export(os.path.join(OUT, name.split(" ")[1].lower() + "_print_oriented.stl"))
     for i in range(len(objs)):
         for j in range(i + 1, len(objs)):
             (n1, t1), (n2, t2) = objs[i], objs[j]
@@ -146,7 +152,7 @@ if __name__ == "__main__":
             if p1[0] != p2[0]:
                 continue
             a = t1.bounds + np.array([p1[1], p1[2], 0]); b = t2.bounds + np.array([p2[1], p2[2], 0])
-            sep = a[1][0] < b[0][0] or b[1][0] < a[0][0] or a[1][1] < b[0][1] or b[1][1] < a[0][1]
-            assert sep, f"footprints overlap: {n1} / {n2}"
+            sep = a[1][0] + 3 < b[0][0] or b[1][0] + 3 < a[0][0] or a[1][1] + 3 < b[0][1] or b[1][1] + 3 < a[0][1]
+            assert sep, f"footprints overlap/too close: {n1} / {n2}"
     write_3mf(os.path.join(OUT, "pantilt_cam_v2_A1mini.3mf"), objs)
     write_plain_3mf(os.path.join(OUT, "pantilt_cam_v2_generic.3mf"), objs)
