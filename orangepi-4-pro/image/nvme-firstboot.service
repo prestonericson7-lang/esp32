@@ -1,0 +1,19 @@
+[Unit]
+Description=Orange Pi 4 Pro: set up the NVMe SSD on first boot (format if blank, mount at /mnt/nvme)
+# run after the root filesystem has been grown and the disks are settled
+After=local-fs.target systemd-udev-settle.service orangepi-resize-filesystem.service dietpi-fs_partition_resize.service dietpi-preboot.service
+Wants=systemd-udev-settle.service
+# only until it has succeeded once
+ConditionPathExists=!/var/lib/nvme-firstboot.done
+
+[Service]
+Type=oneshot
+# give a slow SSD a moment to enumerate on a cold boot
+ExecStartPre=/bin/sleep 5
+ExecStart=/bin/bash -c '/usr/local/sbin/setup-nvme.sh --yes && touch /var/lib/nvme-firstboot.done'
+StandardOutput=journal+console
+StandardError=journal+console
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target
