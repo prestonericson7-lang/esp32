@@ -1,0 +1,798 @@
+/* ============================================================================
+   HomeCam  —  ESP32-S3-CAM (OV3660, N16R8)  pan/tilt security cam
+   ----------------------------------------------------------------------------
+   ONE FILE. Only libraries that ship with the ESP32 board package. Nothing to
+   download. Open in Arduino IDE, set the board options (see bottom of file),
+   put in your WiFi name + password on the two lines just below, and flash.
+
+   Open it on your phone (same WiFi) at:  http://homecam.local   (or the IP it
+   prints to the Serial Monitor at 115200 baud if .local doesn't resolve).
+
+   Hardware (wiring table is in the chat / bottom of this file):
+     - 2x MG90S servos   : pan = GPIO1 , tilt = GPIO42
+     - 2x HLK-LD2410C     : LEFT  TX -> GPIO41 ,  RIGHT TX -> GPIO21
+     - Common ground between the ESP32, the servo supply, and the radars.
+   ========================================================================== */
+
+#include "esp_camera.h"
+#include <WiFi.h>
+#include <ESPmDNS.h>
+#include "esp_http_server.h"
+#include "driver/ledc.h"
+#include "soc/soc.h"
+#include "soc/rtc_cntl_reg.h"
+
+/* ===========================================================================
+   >>>>>>>>>>>>>>>>>>>>>>>  PUT YOUR WIFI INFO HERE  <<<<<<<<<<<<<<<<<<<<<<<<<<
+   Edit the two lines right below. Keep the quotes.
+   =========================================================================== */
+const char* WIFI_SSID = "click for virus";         //  <-- your WiFi network name
+const char* WIFI_PASS = "PUT_YOUR_PASSWORD_HERE";  //  <-- your WiFi password
+/* =========================================================================== */
+
+const char* MDNS_HOST = "homecam";   // -> http://homecam.local   (change if you like)
+
+/* --------------------------------------------------------------------------
+   PIN WIRING  (change a number here if you ever re-wire; nothing else to touch)
+   -------------------------------------------------------------------------- */
+#define PAN_SERVO_PIN     1    // MG90S pan  signal  (orange wire)
+#define TILT_SERVO_PIN    42   // MG90S tilt signal  (orange wire)
+#define RADAR_LEFT_RX     41   // LEFT  LD2410C  "TX" pin -> this ESP pin
+#define RADAR_RIGHT_RX    21   // RIGHT LD2410C  "TX" pin -> this ESP pin
+
+/* If up/down or left/right ends up reversed on your mount, flip the matching
+   flag from false to true and re-flash. (Mechanical orientation only.)        */
+#define PAN_INVERT        false
+#define TILT_INVERT       false
+
+/* Servo travel limits + centre (degrees). Tighten if the mount binds.         */
+#define PAN_MIN_DEG       10
+#define PAN_MAX_DEG       170
+#define PAN_CENTER_DEG    90
+#define TILT_MIN_DEG      40
+#define TILT_MAX_DEG      140
+#define TILT_CENTER_DEG   90
+
+/* MG90S pulse range in microseconds for 0..180 deg (your spec: 500-2500us).   */
+#define SERVO_MIN_US      500
+#define SERVO_MAX_US      2500
+
+/* Onboard WS2812 status LED (GPIO48). Set to 0 to disable completely.         */
+#define USE_STATUS_LED    1
+#define STATUS_LED_PIN    48
+
+/* Default streaming resolution. FRAMESIZE_VGA (640x480) = smooth on a phone.
+   Bump to FRAMESIZE_SVGA for more detail if your WiFi is strong.              */
+#define DEFAULT_FRAMESIZE FRAMESIZE_VGA
+
+/* ============================  CAMERA PIN MAP  =============================
+   This is YOUR board (ESP32-S3-CAM OV3660). Do not change unless you swap
+   boards. (Verified against the board silkscreen.)                           */
+#define PWDN_GPIO_NUM     -1
+#define RESET_GPIO_NUM    -1
+#define XCLK_GPIO_NUM     15
+#define SIOD_GPIO_NUM     4
+#define SIOC_GPIO_NUM     5
+#define Y9_GPIO_NUM       16
+#define Y8_GPIO_NUM       17
+#define Y7_GPIO_NUM       18
+#define Y6_GPIO_NUM       12
+#define Y5_GPIO_NUM       10
+#define Y4_GPIO_NUM       8
+#define Y3_GPIO_NUM       9
+#define Y2_GPIO_NUM       11
+#define VSYNC_GPIO_NUM    6
+#define HREF_GPIO_NUM     7
+#define PCLK_GPIO_NUM     13
+
+/* ----------------------------------------------------------------------------
+   Tunables for behaviour
+   ---------------------------------------------------------------------------- */
+#define STEP_DEG            3        // degrees per button tap / hold-repeat
+#define SERVO_TICK_MS       15       // how often servos step toward target
+#define SERVO_SLEW_DEG      2.0f     // max degrees moved per servo tick (smoothness)
+#define GUARD_TICK_MS       40       // guard-mode logic rate
+#define GUARD_SWEEP_DEG     1.2f     // pan sweep speed per guard tick (~30 deg/s)
+#define GUARD_HOLD_MS       4000     // hold & watch a radar hit this long
+#define LOG_REPEAT_MS       2500     // throttle for "still moving" log lines
+#define LOG_SIZE            40       // activity log ring-buffer length
+#define LOG_JSON_MAX        25       // how many log lines sent to the web page
+
+/* ----------------------------------------------------------------------------
+   Globals
+   ---------------------------------------------------------------------------- */
+// Cross-task control values (written by web handlers, read by loop()).
+// All are int/word sized => atomic single-word access on the ESP32-S3.
+volatile int  g_mode       = 0;              // 0 = manual, 1 = guard
+volatile int  panTarget    = PAN_CENTER_DEG;
+volatile int  tiltTarget   = TILT_CENTER_DEG;
+
+// loop()-only servo state
+float panCur  = PAN_CENTER_DEG;
+float tiltCur = TILT_CENTER_DEG;
+int   sweepDir = 1;
+uint32_t holdUntil = 0;
+uint32_t lastServoTick = 0;
+uint32_t lastGuardTick = 0;
+
+// LEDC servo channels (timer 1 so we never collide with the camera's timer 0).
+#define PAN_LEDC_CH   LEDC_CHANNEL_2
+#define TILT_LEDC_CH  LEDC_CHANNEL_3
+#define SERVO_LEDC_TIMER LEDC_TIMER_1
+
+/* ---- Radar ---------------------------------------------------------------- */
+HardwareSerial RadarLeftSerial(1);   // UART1
+HardwareSerial RadarRightSerial(2);  // UART2
+
+struct Radar {
+  HardwareSerial* ser;
+  char            tag;          // 'L' or 'R'
+  // frame parser
+  uint8_t parseState;
+  uint16_t payloadLen;
+  uint16_t payloadIdx;
+  uint8_t  payload[48];
+  uint8_t  footerIdx;
+  // decoded values
+  volatile uint8_t  state;      // 0 none,1 moving,2 stationary,3 both
+  volatile uint16_t movDist;    // cm
+  volatile uint8_t  movEng;
+  volatile uint16_t statDist;   // cm
+  volatile uint8_t  statEng;
+  volatile uint16_t detDist;    // cm
+  volatile bool     present;
+  volatile uint32_t lastFrameMs;
+  // edge/log bookkeeping
+  bool     prevPresent;
+  uint32_t lastLogMs;
+};
+
+Radar radarL, radarR;
+
+/* ---- Activity log (mutex-protected ring buffer) --------------------------- */
+struct LogEntry {
+  uint32_t t;        // millis()
+  char     side;     // 'L','R','C'
+  uint8_t  st;       // state
+  uint16_t d;        // distance cm
+};
+LogEntry logBuf[LOG_SIZE];
+int logHead = 0;     // index of next write
+int logCount = 0;
+SemaphoreHandle_t logMux;
+
+/* ---- HTTP servers --------------------------------------------------------- */
+httpd_handle_t camera_httpd = NULL;
+httpd_handle_t stream_httpd = NULL;
+
+/* ============================================================================
+   Status LED
+   ========================================================================== */
+inline void statusLED(uint8_t r, uint8_t g, uint8_t b) {
+#if USE_STATUS_LED
+  neopixelWrite(STATUS_LED_PIN, r, g, b);   // built into the ESP32 core (no lib)
+#endif
+}
+
+/* ============================================================================
+   Servos  (ESP-IDF LEDC driver, explicit timer/channel => no camera conflict)
+   ========================================================================== */
+static inline uint32_t usToDuty(int us) {
+  if (us < SERVO_MIN_US) us = SERVO_MIN_US;
+  if (us > SERVO_MAX_US) us = SERVO_MAX_US;
+  // 16-bit resolution, 50 Hz => full scale (65536) == 20000 us period
+  return (uint32_t)(((uint64_t)us * 65536ULL) / 20000ULL);
+}
+
+void servoSetup() {
+  ledc_timer_config_t tcfg;
+  memset(&tcfg, 0, sizeof(tcfg));
+  tcfg.speed_mode      = LEDC_LOW_SPEED_MODE;
+  tcfg.timer_num       = SERVO_LEDC_TIMER;
+  tcfg.duty_resolution = LEDC_TIMER_16_BIT;
+  tcfg.freq_hz         = 50;
+  tcfg.clk_cfg         = LEDC_AUTO_CLK;
+  ledc_timer_config(&tcfg);
+
+  ledc_channel_config_t ccfg;
+  memset(&ccfg, 0, sizeof(ccfg));
+  ccfg.speed_mode = LEDC_LOW_SPEED_MODE;
+  ccfg.timer_sel  = SERVO_LEDC_TIMER;
+  ccfg.intr_type  = LEDC_INTR_DISABLE;
+  ccfg.duty       = 0;
+  ccfg.hpoint     = 0;
+
+  ccfg.channel  = PAN_LEDC_CH;
+  ccfg.gpio_num = PAN_SERVO_PIN;
+  ledc_channel_config(&ccfg);
+
+  ccfg.channel  = TILT_LEDC_CH;
+  ccfg.gpio_num = TILT_SERVO_PIN;
+  ledc_channel_config(&ccfg);
+}
+
+void servoWrite(ledc_channel_t ch, float angleDeg, bool invert) {
+  if (invert) angleDeg = 180.0f - angleDeg;
+  if (angleDeg < 0)   angleDeg = 0;
+  if (angleDeg > 180) angleDeg = 180;
+  int us = SERVO_MIN_US + (int)((angleDeg / 180.0f) * (SERVO_MAX_US - SERVO_MIN_US));
+  ledc_set_duty(LEDC_LOW_SPEED_MODE, ch, usToDuty(us));
+  ledc_update_duty(LEDC_LOW_SPEED_MODE, ch);
+}
+
+static inline int clampi(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
+/* ============================================================================
+   Activity log
+   ========================================================================== */
+void logEvent(char side, uint8_t st, uint16_t d) {
+  if (!logMux) return;
+  if (xSemaphoreTake(logMux, pdMS_TO_TICKS(20)) == pdTRUE) {
+    LogEntry& e = logBuf[logHead];
+    e.t = millis(); e.side = side; e.st = st; e.d = d;
+    logHead = (logHead + 1) % LOG_SIZE;
+    if (logCount < LOG_SIZE) logCount++;
+    xSemaphoreGive(logMux);
+  }
+}
+
+void logClear() {
+  if (!logMux) return;
+  if (xSemaphoreTake(logMux, pdMS_TO_TICKS(20)) == pdTRUE) {
+    logHead = 0; logCount = 0;
+    xSemaphoreGive(logMux);
+  }
+}
+
+/* ============================================================================
+   LD2410 frame parser  (non-blocking, byte-at-a-time state machine)
+   Data frame:  F4 F3 F2 F1 | len(2 LE) | payload[len] | F8 F7 F6 F5
+   payload: 0x02,0xAA,state,movDist(2),movEng,statDist(2),statEng,detDist(2),0x55,chk
+   ========================================================================== */
+uint16_t radarDistance(const Radar& r) {
+  if (r.state == 1) return r.movDist;
+  if (r.state == 2) return r.statDist;
+  if (r.state == 3) return r.movDist ? r.movDist : r.statDist;
+  return r.detDist;
+}
+
+void radarDecode(Radar& r) {
+  // Common fields (valid for both basic 0x02 and engineering 0x01 frames)
+  if (r.payloadLen < 13) return;
+  if (r.payload[0] != 0x02 && r.payload[0] != 0x01) return;
+  if (r.payload[1] != 0xAA) return;
+
+  r.state    = r.payload[2];
+  r.movDist  = (uint16_t)r.payload[3]  | ((uint16_t)r.payload[4]  << 8);
+  r.movEng   = r.payload[5];
+  r.statDist = (uint16_t)r.payload[6]  | ((uint16_t)r.payload[7]  << 8);
+  r.statEng  = r.payload[8];
+  r.detDist  = (uint16_t)r.payload[9]  | ((uint16_t)r.payload[10] << 8);
+  r.present  = (r.state != 0);
+  r.lastFrameMs = millis();
+
+  // Logging: appear / disappear edges, plus throttled "still moving"
+  uint32_t now = millis();
+  if (r.present && !r.prevPresent) {
+    logEvent(r.tag, r.state, radarDistance(r));
+    r.lastLogMs = now;
+  } else if (!r.present && r.prevPresent) {
+    logEvent(r.tag, 0, 0);               // cleared
+  } else if (r.present && (r.state == 1 || r.state == 3)) {
+    if (now - r.lastLogMs >= LOG_REPEAT_MS) {
+      logEvent(r.tag, r.state, radarDistance(r));
+      r.lastLogMs = now;
+    }
+  }
+  r.prevPresent = r.present;
+}
+
+void radarFeed(Radar& r, uint8_t b) {
+  switch (r.parseState) {
+    case 0: r.parseState = (b == 0xF4) ? 1 : 0; break;
+    case 1: r.parseState = (b == 0xF3) ? 2 : (b == 0xF4 ? 1 : 0); break;
+    case 2: r.parseState = (b == 0xF2) ? 3 : (b == 0xF4 ? 1 : 0); break;
+    case 3: r.parseState = (b == 0xF1) ? 4 : (b == 0xF4 ? 1 : 0); break;
+    case 4: r.payloadLen = b; r.parseState = 5; break;                    // len low
+    case 5:
+      r.payloadLen |= ((uint16_t)b << 8);                                 // len high
+      if (r.payloadLen == 0 || r.payloadLen > sizeof(r.payload)) { r.parseState = 0; }
+      else { r.payloadIdx = 0; r.parseState = 6; }
+      break;
+    case 6:
+      r.payload[r.payloadIdx++] = b;
+      if (r.payloadIdx >= r.payloadLen) { r.footerIdx = 0; r.parseState = 7; }
+      break;
+    case 7: {
+      static const uint8_t foot[4] = {0xF8, 0xF7, 0xF6, 0xF5};
+      if (b == foot[r.footerIdx]) {
+        r.footerIdx++;
+        if (r.footerIdx >= 4) { radarDecode(r); r.parseState = 0; }
+      } else {
+        r.parseState = (b == 0xF4) ? 1 : 0;                               // resync
+      }
+      break;
+    }
+    default: r.parseState = 0; break;
+  }
+}
+
+void radarPoll(Radar& r) {
+  int guard = 0;
+  while (r.ser->available() && guard++ < 256) {
+    radarFeed(r, (uint8_t)r.ser->read());
+  }
+  // staleness: if no frame for >1.5s, treat as clear (radar unplugged / quiet)
+  if (r.present && (millis() - r.lastFrameMs > 1500)) {
+    r.present = false;
+    if (r.prevPresent) { logEvent(r.tag, 0, 0); r.prevPresent = false; }
+  }
+}
+
+/* ============================================================================
+   Guard-mode logic  (sweep pan L<->R, slew toward whichever radar fires)
+   ========================================================================== */
+void guardUpdate(uint32_t now) {
+  if (g_mode != 1) { holdUntil = 0; return; }
+
+  bool l = radarL.present;
+  bool r = radarR.present;
+
+  if (l || r) {
+    // Point toward the stronger / only hit. Left radar -> pan to the MIN side.
+    int target;
+    if (l && r) {
+      target = (radarL.movEng + radarL.statEng) >= (radarR.movEng + radarR.statEng)
+               ? PAN_MIN_DEG + 15 : PAN_MAX_DEG - 15;
+    } else if (l) {
+      target = PAN_MIN_DEG + 15;
+    } else {
+      target = PAN_MAX_DEG - 15;
+    }
+    panTarget = clampi(target, PAN_MIN_DEG, PAN_MAX_DEG);
+    holdUntil = now + GUARD_HOLD_MS;
+    return;
+  }
+
+  // Still holding on the last hit?
+  if (now < holdUntil) return;
+
+  // Otherwise sweep back and forth.
+  float p = panTarget;
+  p += sweepDir * GUARD_SWEEP_DEG;
+  if (p >= PAN_MAX_DEG) { p = PAN_MAX_DEG; sweepDir = -1; }
+  if (p <= PAN_MIN_DEG) { p = PAN_MIN_DEG; sweepDir =  1; }
+  panTarget = (int)p;
+}
+
+/* ============================================================================
+   Servo motion (smooth slew toward target)
+   ========================================================================== */
+void servoTick() {
+  float pt = (float)panTarget;
+  float tt = (float)tiltTarget;
+
+  if (panCur < pt)      panCur = min(pt, panCur + SERVO_SLEW_DEG);
+  else if (panCur > pt) panCur = max(pt, panCur - SERVO_SLEW_DEG);
+
+  if (tiltCur < tt)      tiltCur = min(tt, tiltCur + SERVO_SLEW_DEG);
+  else if (tiltCur > tt) tiltCur = max(tt, tiltCur - SERVO_SLEW_DEG);
+
+  servoWrite(PAN_LEDC_CH,  panCur,  PAN_INVERT);
+  servoWrite(TILT_LEDC_CH, tiltCur, TILT_INVERT);
+}
+
+/* ============================================================================
+   Camera init
+   ========================================================================== */
+bool initCamera() {
+  camera_config_t config;
+  memset(&config, 0, sizeof(config));
+  config.ledc_channel = LEDC_CHANNEL_0;   // camera owns ch0 / timer0
+  config.ledc_timer   = LEDC_TIMER_0;
+  config.pin_d0 = Y2_GPIO_NUM;
+  config.pin_d1 = Y3_GPIO_NUM;
+  config.pin_d2 = Y4_GPIO_NUM;
+  config.pin_d3 = Y5_GPIO_NUM;
+  config.pin_d4 = Y6_GPIO_NUM;
+  config.pin_d5 = Y7_GPIO_NUM;
+  config.pin_d6 = Y8_GPIO_NUM;
+  config.pin_d7 = Y9_GPIO_NUM;
+  config.pin_xclk  = XCLK_GPIO_NUM;
+  config.pin_pclk  = PCLK_GPIO_NUM;
+  config.pin_vsync = VSYNC_GPIO_NUM;
+  config.pin_href  = HREF_GPIO_NUM;
+  config.pin_sccb_sda = SIOD_GPIO_NUM;
+  config.pin_sccb_scl = SIOC_GPIO_NUM;
+  config.pin_pwdn  = PWDN_GPIO_NUM;
+  config.pin_reset = RESET_GPIO_NUM;
+  config.xclk_freq_hz = 20000000;
+  config.frame_size   = DEFAULT_FRAMESIZE;
+  config.pixel_format = PIXFORMAT_JPEG;
+  config.grab_mode    = CAMERA_GRAB_LATEST;
+  config.fb_location  = CAMERA_FB_IN_PSRAM;
+  config.jpeg_quality = 12;
+  config.fb_count     = 2;
+
+  if (!psramFound()) {
+    // Fallback if PSRAM isn't detected (shouldn't happen on N16R8)
+    config.frame_size   = FRAMESIZE_QVGA;
+    config.fb_location  = CAMERA_FB_IN_DRAM;
+    config.grab_mode    = CAMERA_GRAB_WHEN_EMPTY;
+    config.fb_count     = 1;
+  }
+
+  esp_err_t err = esp_camera_init(&config);
+  if (err != ESP_OK) {
+    Serial.printf("[CAM] init FAILED 0x%x — check the camera ribbon is seated.\n", err);
+    return false;
+  }
+
+  sensor_t* s = esp_camera_sensor_get();
+  if (s) {
+    // OV3660 modules image upside-down & a touch washed-out by default.
+    if (s->id.PID == OV3660_PID) {
+      s->set_vflip(s, 1);
+      s->set_brightness(s, 1);
+      s->set_saturation(s, -2);
+    }
+    s->set_framesize(s, DEFAULT_FRAMESIZE);
+  }
+  Serial.println("[CAM] ready");
+  return true;
+}
+
+/* ============================================================================
+   Web page (minimal, mobile-first). Stored in flash.
+   ========================================================================== */
+static const char INDEX_HTML[] PROGMEM = R"HTML(<!doctype html><html><head>
+<meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>HomeCam</title>
+<style>
+:root{--bg:#0d0f14;--card:#171a21;--acc:#2f81f7;--txt:#e6e6e6;--mut:#8b94a3;--warn:#d29922}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,Arial,sans-serif}
+header{padding:10px 14px;font-weight:700;font-size:18px;display:flex;justify-content:space-between;align-items:center}
+#wrap{max-width:720px;margin:0 auto;padding:0 10px 30px}
+.card{background:var(--card);border-radius:12px;padding:12px;margin:10px 0}
+#vid{width:100%;border-radius:10px;background:#000;display:block;aspect-ratio:4/3;object-fit:contain}
+.pad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;max-width:270px;margin:4px auto 0}
+button{background:#222733;color:var(--txt);border:1px solid #2b3240;border-radius:10px;padding:16px;font-size:18px;cursor:pointer;touch-action:none;-webkit-user-select:none;user-select:none}
+button:active{background:var(--acc)}
+.wide{width:100%;padding:14px;font-size:16px}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.pill{flex:1;min-width:120px;background:#222733;border-radius:10px;padding:10px;text-align:center}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:#444;margin-right:6px;vertical-align:middle}
+.on{background:var(--warn);box-shadow:0 0 8px var(--warn)}
+#guardBtn.g{background:var(--warn);border-color:var(--warn);color:#000}
+#log{max-height:220px;overflow:auto;white-space:pre-wrap;font:13px/1.5 monospace;color:var(--mut)}
+.mut{color:var(--mut);font-size:13px}
+a{color:var(--acc)}
+</style></head><body>
+<header><span>&#127968; HomeCam</span><span id=st class=mut>&hellip;</span></header>
+<div id=wrap>
+ <div class=card><img id=vid alt="camera"></div>
+ <div class=card>
+  <div class=pad>
+   <span></span><button id=bu>&#9650;</button><span></span>
+   <button id=bl>&#9664;</button><button id=bc>&#9632;</button><button id=br>&#9654;</button>
+   <span></span><button id=bd>&#9660;</button><span></span>
+  </div>
+  <div class=mut style="text-align:center;margin-top:8px">Pan <span id=pan>90</span>&deg; &middot; Tilt <span id=tilt>90</span>&deg;</div>
+ </div>
+ <div class=card>
+  <button id=guardBtn class=wide>Guard Mode: OFF</button>
+  <div class=row style="margin-top:10px">
+   <div class=pill><span class=dot id=ldot></span>Left<br><span id=lv class=mut>&mdash;</span></div>
+   <div class=pill><span class=dot id=rdot></span>Right<br><span id=rv class=mut>&mdash;</span></div>
+  </div>
+  <div style="margin-top:10px"><a href="/capture" target=_blank>&#128247; Snapshot</a></div>
+ </div>
+ <div class=card>
+  <div style="display:flex;justify-content:space-between"><b>Activity Log</b><span id=clr class=mut style="cursor:pointer">clear</span></div>
+  <div id=log>&mdash;</div>
+ </div>
+</div>
+<script>
+var H=location.hostname;
+document.getElementById('vid').src='http://'+H+':81/stream';
+function cmd(q){fetch('/cmd?'+q).catch(function(){});}
+function hold(id,q){var el=document.getElementById(id),iv=null;
+ function go(){cmd(q);}
+ el.addEventListener('pointerdown',function(e){e.preventDefault();go();iv=setInterval(go,160);});
+ function stop(){if(iv){clearInterval(iv);iv=null;}}
+ el.addEventListener('pointerup',stop);el.addEventListener('pointerleave',stop);el.addEventListener('pointercancel',stop);}
+hold('bu','move=up');hold('bd','move=down');hold('bl','move=left');hold('br','move=right');
+document.getElementById('bc').onclick=function(){cmd('center=1');};
+document.getElementById('guardBtn').onclick=function(){cmd('guard='+(document.getElementById('guardBtn').classList.contains('g')?0:1));};
+document.getElementById('clr').onclick=function(){cmd('clearlog=1');};
+function stxt(s){return s==1?'moving':s==2?'still':s==3?'moving':'clear';}
+function upd(p,o){var d=document.getElementById(p+'dot'),v=document.getElementById(p+'v');
+ if(o&&o.present){d.className='dot on';v.textContent=stxt(o.st)+' '+o.d+'cm';}else{d.className='dot';v.textContent='clear';}}
+function ago(t,now){var s=Math.max(0,Math.round((now-t)/1000));return s<1?'now':(s<60?s+'s':Math.floor(s/60)+'m')+' ago';}
+function poll(){fetch('/status').then(function(r){return r.json();}).then(function(j){
+ document.getElementById('st').textContent=(j.mode?'GUARD':'manual')+' · '+j.ip;
+ document.getElementById('pan').textContent=j.pan;
+ document.getElementById('tilt').textContent=j.tilt;
+ var gb=document.getElementById('guardBtn');gb.textContent='Guard Mode: '+(j.mode?'ON':'OFF');gb.className='wide'+(j.mode?' g':'');
+ upd('l',j.left);upd('r',j.right);
+ var h='';
+ if(j.log&&j.log.length){for(var i=0;i<j.log.length;i++){var e=j.log[i];
+  h+=ago(e.t,j.now)+'  '+(e.side=='L'?'◄ LEFT ':(e.side=='R'?'RIGHT ►':'CAM    '))+'  '+stxt(e.st)+(e.st?(' @ '+e.d+'cm'):'')+'\n';}}
+ else h='no activity yet';
+ document.getElementById('log').textContent=h;
+}).catch(function(){});}
+setInterval(poll,1000);poll();
+</script></body></html>)HTML";
+
+/* ============================================================================
+   HTTP handlers
+   ========================================================================== */
+#define PART_BOUNDARY "homecamframe"
+static const char* STREAM_CONTENT_TYPE = "multipart/x-mixed-replace;boundary=" PART_BOUNDARY;
+static const char* STREAM_BOUNDARY     = "\r\n--" PART_BOUNDARY "\r\n";
+static const char* STREAM_PART         = "Content-Type: image/jpeg\r\nContent-Length: %u\r\n\r\n";
+
+esp_err_t index_handler(httpd_req_t* req) {
+  httpd_resp_set_type(req, "text/html");
+  httpd_resp_set_hdr(req, "Content-Encoding", "identity");
+  return httpd_resp_send(req, INDEX_HTML, HTTPD_RESP_USE_STRLEN);
+}
+
+esp_err_t capture_handler(httpd_req_t* req) {
+  camera_fb_t* fb = esp_camera_fb_get();
+  if (!fb) { httpd_resp_send_500(req); return ESP_FAIL; }
+  httpd_resp_set_type(req, "image/jpeg");
+  httpd_resp_set_hdr(req, "Content-Disposition", "inline; filename=snap.jpg");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  esp_err_t res = httpd_resp_send(req, (const char*)fb->buf, fb->len);
+  esp_camera_fb_return(fb);
+  return res;
+}
+
+esp_err_t stream_handler(httpd_req_t* req) {
+  camera_fb_t* fb = NULL;
+  esp_err_t res = ESP_OK;
+  char part[72];
+
+  res = httpd_resp_set_type(req, STREAM_CONTENT_TYPE);
+  if (res != ESP_OK) return res;
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_set_hdr(req, "X-Framerate", "30");
+
+  while (true) {
+    fb = esp_camera_fb_get();
+    if (!fb) { res = ESP_FAIL; break; }
+
+    if (res == ESP_OK)
+      res = httpd_resp_send_chunk(req, STREAM_BOUNDARY, strlen(STREAM_BOUNDARY));
+    if (res == ESP_OK) {
+      size_t hl = snprintf(part, sizeof(part), STREAM_PART, fb->len);
+      res = httpd_resp_send_chunk(req, part, hl);
+    }
+    if (res == ESP_OK)
+      res = httpd_resp_send_chunk(req, (const char*)fb->buf, fb->len);
+
+    esp_camera_fb_return(fb);
+    fb = NULL;
+    if (res != ESP_OK) break;   // client closed the connection
+  }
+  return res;
+}
+
+esp_err_t status_handler(httpd_req_t* req) {
+  // Snapshot the log under the mutex, then build JSON outside the lock.
+  LogEntry tmp[LOG_JSON_MAX];
+  int n = 0;
+  if (logMux && xSemaphoreTake(logMux, pdMS_TO_TICKS(30)) == pdTRUE) {
+    int count = logCount < LOG_JSON_MAX ? logCount : LOG_JSON_MAX;
+    for (int i = 0; i < count; i++) {
+      int idx = (logHead - 1 - i + LOG_SIZE * 2) % LOG_SIZE;  // newest first
+      tmp[n++] = logBuf[idx];
+    }
+    xSemaphoreGive(logMux);
+  }
+
+  String out;
+  out.reserve(1600);
+  out  = "{\"mode\":"; out += g_mode;
+  out += ",\"pan\":";  out += (int)panCur;
+  out += ",\"tilt\":"; out += (int)tiltCur;
+  out += ",\"now\":";  out += (uint32_t)millis();
+  out += ",\"ip\":\""; out += WiFi.localIP().toString(); out += "\"";
+
+  out += ",\"left\":{\"present\":";  out += radarL.present ? "true" : "false";
+  out += ",\"st\":"; out += radarL.state; out += ",\"d\":"; out += radarDistance(radarL); out += "}";
+  out += ",\"right\":{\"present\":"; out += radarR.present ? "true" : "false";
+  out += ",\"st\":"; out += radarR.state; out += ",\"d\":"; out += radarDistance(radarR); out += "}";
+
+  out += ",\"log\":[";
+  for (int i = 0; i < n; i++) {
+    if (i) out += ",";
+    out += "{\"t\":";   out += tmp[i].t;
+    out += ",\"side\":\""; out += tmp[i].side; out += "\"";
+    out += ",\"st\":";  out += tmp[i].st;
+    out += ",\"d\":";   out += tmp[i].d; out += "}";
+  }
+  out += "]}";
+
+  httpd_resp_set_type(req, "application/json");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  return httpd_resp_send(req, out.c_str(), out.length());
+}
+
+esp_err_t cmd_handler(httpd_req_t* req) {
+  char  val[24];
+  size_t qlen = httpd_req_get_url_query_len(req) + 1;
+  if (qlen > 1 && qlen < 128) {
+    char* q = (char*)malloc(qlen);
+    if (q && httpd_req_get_url_query_str(req, q, qlen) == ESP_OK) {
+
+      if (httpd_query_key_value(q, "move", val, sizeof(val)) == ESP_OK) {
+        g_mode = 0;              // taking manual control cancels guard
+        holdUntil = 0;
+        if (!strcmp(val, "up"))    tiltTarget = clampi(tiltTarget + STEP_DEG, TILT_MIN_DEG, TILT_MAX_DEG);
+        if (!strcmp(val, "down"))  tiltTarget = clampi(tiltTarget - STEP_DEG, TILT_MIN_DEG, TILT_MAX_DEG);
+        if (!strcmp(val, "left"))  panTarget  = clampi(panTarget  - STEP_DEG, PAN_MIN_DEG,  PAN_MAX_DEG);
+        if (!strcmp(val, "right")) panTarget  = clampi(panTarget  + STEP_DEG, PAN_MIN_DEG,  PAN_MAX_DEG);
+      }
+      if (httpd_query_key_value(q, "center", val, sizeof(val)) == ESP_OK) {
+        g_mode = 0; panTarget = PAN_CENTER_DEG; tiltTarget = TILT_CENTER_DEG;
+      }
+      if (httpd_query_key_value(q, "guard", val, sizeof(val)) == ESP_OK) {
+        g_mode = (val[0] == '1') ? 1 : 0;
+      }
+      if (httpd_query_key_value(q, "clearlog", val, sizeof(val)) == ESP_OK) {
+        logClear();
+      }
+    }
+    if (q) free(q);
+  }
+  httpd_resp_set_type(req, "text/plain");
+  httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  return httpd_resp_send(req, "ok", 2);
+}
+
+void startServers() {
+  httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+  config.max_uri_handlers = 8;
+  config.lru_purge_enable = true;
+
+  // Control / UI server on port 80
+  config.server_port = 80;
+  config.ctrl_port   = 32768;
+  if (httpd_start(&camera_httpd, &config) == ESP_OK) {
+    httpd_uri_t u_index   = { "/",        HTTP_GET, index_handler,   NULL };
+    httpd_uri_t u_cmd     = { "/cmd",     HTTP_GET, cmd_handler,     NULL };
+    httpd_uri_t u_status  = { "/status",  HTTP_GET, status_handler,  NULL };
+    httpd_uri_t u_capture = { "/capture", HTTP_GET, capture_handler, NULL };
+    httpd_register_uri_handler(camera_httpd, &u_index);
+    httpd_register_uri_handler(camera_httpd, &u_cmd);
+    httpd_register_uri_handler(camera_httpd, &u_status);
+    httpd_register_uri_handler(camera_httpd, &u_capture);
+    Serial.println("[WEB] control server on :80");
+  }
+
+  // Dedicated MJPEG stream server on port 81 (so the stream can't block the UI)
+  config.server_port = 81;
+  config.ctrl_port   = 32769;
+  if (httpd_start(&stream_httpd, &config) == ESP_OK) {
+    httpd_uri_t u_stream = { "/stream", HTTP_GET, stream_handler, NULL };
+    httpd_register_uri_handler(stream_httpd, &u_stream);
+    Serial.println("[WEB] stream server on :81");
+  }
+}
+
+/* ============================================================================
+   WiFi
+   ========================================================================== */
+void connectWiFi() {
+  WiFi.mode(WIFI_STA);
+  WiFi.setSleep(false);                 // keeps the stream snappy
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  Serial.printf("[WiFi] connecting to \"%s\" ", WIFI_SSID);
+
+  uint32_t start = millis();
+  bool blink = false;
+  while (WiFi.status() != WL_CONNECTED && millis() - start < 30000) {
+    delay(300);
+    Serial.print(".");
+    blink = !blink;
+    statusLED(0, 0, blink ? 40 : 0);    // blink blue while connecting
+  }
+  Serial.println();
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.print("[WiFi] connected. IP: ");
+    Serial.println(WiFi.localIP());
+    statusLED(0, 30, 0);                 // green = connected
+  } else {
+    Serial.println("[WiFi] FAILED — check SSID/password at the top of the sketch.");
+    statusLED(40, 0, 0);                 // red = no wifi
+  }
+}
+
+/* ============================================================================
+   setup / loop
+   ========================================================================== */
+void setup() {
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);   // camera+wifi current spikes trip
+                                               // a false brownout on these boards
+  Serial.begin(115200);
+  delay(300);
+  Serial.println("\n== HomeCam booting ==");
+
+  statusLED(20, 0, 20);                        // purple = booting
+
+  logMux = xSemaphoreCreateMutex();
+
+  // Servos first, then centre them.
+  servoSetup();
+  servoWrite(PAN_LEDC_CH,  panCur,  PAN_INVERT);
+  servoWrite(TILT_LEDC_CH, tiltCur, TILT_INVERT);
+
+  // Radars (RX only; 256000 baud default for LD2410C).
+  radarL = Radar(); radarR = Radar();
+  radarL.ser = &RadarLeftSerial;  radarL.tag = 'L';
+  radarR.ser = &RadarRightSerial; radarR.tag = 'R';
+  RadarLeftSerial.setRxBufferSize(512);
+  RadarRightSerial.setRxBufferSize(512);
+  RadarLeftSerial.begin(256000, SERIAL_8N1, RADAR_LEFT_RX, -1);
+  RadarRightSerial.begin(256000, SERIAL_8N1, RADAR_RIGHT_RX, -1);
+  Serial.println("[RADAR] LD2410C serial up (left=GPIO41, right=GPIO21)");
+
+  // Camera
+  if (!initCamera()) {
+    // Halt with a red LED so you get clear feedback instead of a silent fail.
+    while (true) { statusLED(60, 0, 0); delay(400); statusLED(0, 0, 0); delay(400); }
+  }
+
+  connectWiFi();
+
+  if (MDNS.begin(MDNS_HOST)) {
+    MDNS.addService("http", "tcp", 80);
+    Serial.printf("[mDNS] http://%s.local\n", MDNS_HOST);
+  }
+
+  startServers();
+
+  Serial.println("== HomeCam ready ==");
+}
+
+void loop() {
+  radarPoll(radarL);
+  radarPoll(radarR);
+
+  uint32_t now = millis();
+  if (now - lastGuardTick >= GUARD_TICK_MS) { lastGuardTick = now; guardUpdate(now); }
+  if (now - lastServoTick >= SERVO_TICK_MS) { lastServoTick = now; servoTick(); }
+
+  // Status LED: amber in guard mode, green otherwise (only when connected).
+  static uint32_t lastLed = 0;
+  if (WiFi.status() == WL_CONNECTED && now - lastLed > 500) {
+    lastLed = now;
+    if (g_mode == 1) {
+      bool hit = radarL.present || radarR.present;
+      statusLED(hit ? 60 : 35, hit ? 30 : 20, 0);   // amber, brighter on a hit
+    } else {
+      statusLED(0, 25, 0);                            // green
+    }
+  }
+
+  delay(2);   // keep the watchdog happy, yield to WiFi/httpd tasks
+}
+
+/* ============================================================================
+   ARDUINO IDE BOARD SETTINGS  (do this once)
+   ----------------------------------------------------------------------------
+   Tools menu:
+     Board:            "ESP32S3 Dev Module"   (under esp32 by Espressif)
+     USB CDC On Boot:  "Enabled"
+     Flash Size:       "16MB (128Mb)"
+     Partition Scheme: "16M Flash (3MB APP/9.9MB FATFS)"  (or any with >=3MB app)
+     PSRAM:            "OPI PSRAM"            <-- IMPORTANT (this is the R8)
+     Upload Mode:      "UART0 / Hardware CDC"
+   Plug the USB-C cable into the port labelled "TTL" to upload.
+   Open Serial Monitor at 115200 to see the IP address.
+   ========================================================================== */
