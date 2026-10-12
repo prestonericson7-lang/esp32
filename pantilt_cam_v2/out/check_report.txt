@@ -1,8 +1,8 @@
 == part sanity
   base   watertight=True genus=6 vol=   65003
   head   watertight=True genus=8 vol=   61733
-  pod    watertight=True genus=4 vol=   24481
-  cover  watertight=True genus=3 vol=    8420
+  pod    watertight=True genus=4 vol=   24711
+  cover  watertight=True genus=3 vol=    8088
   pin    watertight=True genus=0 vol=     596
   pinion watertight=True genus=7 vol=    8137
   clip   watertight=True genus=0 vol=     353
@@ -78,7 +78,8 @@
   esp dupont housings ^ pod                    intersect =     0.000 mm3
   esp dupont housings ^ cover                  intersect =     0.000 mm3
   esp solder bumps ^ pod                       intersect =     0.000 mm3
-  esp usb receptacles ^ pod                    intersect =     0.000 mm3
+  esp usb receptacles ^ pod (locating blocks)  intersect =     0.000 mm3
+  esp pcb ^ pod (pegs through the holes)       intersect =     0.000 mm3
   esp usb receptacles ^ cover                  intersect =     0.000 mm3
   esp usb plugs ^ pod                          intersect =     0.000 mm3
   esp usb plugs ^ head (tilt 0)                intersect =     0.000 mm3
@@ -124,12 +125,12 @@
   tilt   50: pod-to-post/base gap =  5.19 mm   plug^fixed =     0.0 mm3
   tilt   55: pod-to-post/base gap =  5.24 mm   plug^fixed =     0.0 mm3
   tilt   60: pod-to-post/base gap =  5.51 mm   plug^fixed =     0.0 mm3
-  tilt   65: pod-to-post/base gap =  6.00 mm   plug^fixed =     9.7 mm3 PLUG-HITS
-  tilt   70: pod-to-post/base gap =  6.70 mm   plug^fixed =    67.7 mm3 PLUG-HITS
-  tilt   75: pod-to-post/base gap =  7.61 mm   plug^fixed =   147.1 mm3 PLUG-HITS
-  tilt   80: pod-to-post/base gap =  8.73 mm   plug^fixed =   221.5 mm3 PLUG-HITS
-  tilt   85: pod-to-post/base gap = 10.22 mm   plug^fixed =   292.2 mm3 PLUG-HITS
-  tilt   90: pod-to-post/base gap = 11.50 mm   plug^fixed =   360.4 mm3 PLUG-HITS
+  tilt   65: pod-to-post/base gap =  6.00 mm   plug^fixed =     3.1 mm3 PLUG-HITS
+  tilt   70: pod-to-post/base gap =  6.70 mm   plug^fixed =    45.1 mm3 PLUG-HITS
+  tilt   75: pod-to-post/base gap =  7.61 mm   plug^fixed =   124.0 mm3 PLUG-HITS
+  tilt   80: pod-to-post/base gap =  8.73 mm   plug^fixed =   198.4 mm3 PLUG-HITS
+  tilt   85: pod-to-post/base gap = 10.22 mm   plug^fixed =   269.1 mm3 PLUG-HITS
+  tilt   90: pod-to-post/base gap = 11.50 mm   plug^fixed =   337.3 mm3 PLUG-HITS
   -> pod never touches anything fixed: True;  USB plug clears down to +60 deg, up to -90 deg
 
 == overhang faces for base (plate down): 230 faces, 336.4 mm2 (bed at z=0)
