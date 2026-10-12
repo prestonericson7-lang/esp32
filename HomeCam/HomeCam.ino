@@ -163,6 +163,12 @@ SemaphoreHandle_t logMux;
 httpd_handle_t camera_httpd = NULL;
 httpd_handle_t stream_httpd = NULL;
 
+/* ---- Stream / diagnostics ------------------------------------------------- */
+volatile uint32_t g_servedFrames = 0;   // JPEG frames sent to clients (any endpoint)
+volatile float    g_fps          = 0;   // frames/sec served (computed in loop())
+volatile bool     g_psram        = false;
+const char*       g_resLabel     = "VGA";
+
 /* ============================================================================
    Status LED
    ========================================================================== */
@@ -422,8 +428,10 @@ bool initCamera() {
   config.jpeg_quality = 12;
   config.fb_count     = 2;
 
-  if (!psramFound()) {
-    // Fallback if PSRAM isn't detected (shouldn't happen on N16R8)
+  g_psram = psramFound();
+  if (!g_psram) {
+    // Fallback if PSRAM isn't detected. On an N16R8 this means "OPI PSRAM" was
+    // NOT selected in Tools > PSRAM -> tiny single-buffer feed until you fix it.
     config.frame_size   = FRAMESIZE_QVGA;
     config.fb_location  = CAMERA_FB_IN_DRAM;
     config.grab_mode    = CAMERA_GRAB_WHEN_EMPTY;
@@ -444,9 +452,12 @@ bool initCamera() {
       s->set_brightness(s, 1);
       s->set_saturation(s, -2);
     }
-    s->set_framesize(s, DEFAULT_FRAMESIZE);
+    s->set_framesize(s, g_psram ? DEFAULT_FRAMESIZE : FRAMESIZE_QVGA);
   }
-  Serial.println("[CAM] ready");
+  g_resLabel = g_psram ? "VGA" : "QVGA";
+  Serial.printf("[CAM] ready | PSRAM: %s | start res: %s | fb_count: %d\n",
+                g_psram ? "YES" : "NO  <-- set Tools>PSRAM>OPI PSRAM and re-flash!",
+                g_resLabel, config.fb_count);
   return true;
 }
 
@@ -464,7 +475,17 @@ body{margin:0;background:var(--bg);color:var(--txt);font-family:system-ui,Arial,
 header{padding:10px 14px;font-weight:700;font-size:18px;display:flex;justify-content:space-between;align-items:center}
 #wrap{max-width:720px;margin:0 auto;padding:0 10px 30px}
 .card{background:var(--card);border-radius:12px;padding:12px;margin:10px 0}
-#vid{width:100%;border-radius:10px;background:#000;display:block;aspect-ratio:4/3;object-fit:contain}
+#vwrap{position:relative;border-radius:10px;overflow:hidden;background:#000;aspect-ratio:4/3}
+#vwrap img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000}
+#vid2{opacity:0}
+#hud{position:absolute;top:6px;left:6px;z-index:2;display:flex;gap:6px;align-items:center;background:rgba(0,0,0,.55);color:#fff;font:12px/1 monospace;padding:5px 8px;border-radius:8px;pointer-events:none}
+#fps{color:#2ea043;font-weight:700}
+#bars{display:inline-flex;gap:2px;align-items:flex-end;height:13px}
+#bars i{width:3px;background:#555;border-radius:1px}
+#psw{position:absolute;bottom:6px;left:6px;right:6px;z-index:2;background:#b62324;color:#fff;font:12px/1.35 sans-serif;padding:7px 9px;border-radius:8px;display:none}
+.seg{display:flex;gap:6px;margin-top:8px}
+.seg button{flex:1;padding:9px 4px;font-size:13px;line-height:1.2}
+.seg button.sel{background:var(--acc);border-color:var(--acc);color:#fff}
 .pad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;max-width:270px;margin:4px auto 0}
 button{background:#222733;color:var(--txt);border:1px solid #2b3240;border-radius:10px;padding:16px;font-size:18px;cursor:pointer;touch-action:none;-webkit-user-select:none;user-select:none}
 button:active{background:var(--acc)}
@@ -480,7 +501,22 @@ a{color:var(--acc)}
 </style></head><body>
 <header><span>&#127968; HomeCam</span><span id=st class=mut>&hellip;</span></header>
 <div id=wrap>
- <div class=card><img id=vid alt="camera"></div>
+ <div class=card>
+  <div id=vwrap>
+   <img id=vid alt="camera"><img id=vid2 alt="">
+   <div id=hud><span id=bars></span><span id=fps>--</span> fps<span id=res></span></div>
+   <div id=psw>&#9888; PSRAM is OFF &mdash; set Tools &gt; PSRAM &gt; <b>OPI PSRAM</b> in Arduino IDE and re-flash. The feed stays slow until you do.</div>
+  </div>
+  <div class=seg>
+   <button data-r=qvga>QVGA<br><span class=mut>fastest</span></button>
+   <button data-r=vga class=sel>VGA<br><span class=mut>balanced</span></button>
+   <button data-r=svga>SVGA<br><span class=mut>sharp</span></button>
+  </div>
+  <div class=seg>
+   <button id=mSnap class=sel>Snapshot<br><span class=mut>iPhone-smooth</span></button>
+   <button id=mStream>Stream<br><span class=mut>MJPEG</span></button>
+  </div>
+ </div>
  <div class=card>
   <div class=pad>
    <span></span><button id=bu>&#9650;</button><span></span>
@@ -504,7 +540,30 @@ a{color:var(--acc)}
 </div>
 <script>
 var H=location.hostname;
-document.getElementById('vid').src='http://'+H+':81/stream';
+var imgs=[document.getElementById('vid'),document.getElementById('vid2')];
+var cur=0, mode='snap', busy=false, gen=0;
+function capURL(){return 'http://'+H+':81/capture?x='+Date.now();}
+function pump(){
+ if(mode!=='snap'||busy) return;
+ busy=true; var g=++gen; var nxt=imgs[1-cur];
+ nxt.onload=function(){ busy=false; if(g!==gen||mode!=='snap') return;
+  nxt.style.opacity=1; imgs[cur].style.opacity=0; cur=1-cur; requestAnimationFrame(pump); };
+ nxt.onerror=function(){ busy=false; if(mode==='snap') setTimeout(pump,300); };
+ nxt.src=capURL();
+}
+function setMode(m){
+ gen++; busy=false; mode=m;
+ document.getElementById('mSnap').className=(m==='snap'?'sel':'');
+ document.getElementById('mStream').className=(m==='mjpeg'?'sel':'');
+ if(m==='mjpeg'){ imgs[1].style.opacity=0; imgs[0].style.opacity=1; imgs[0].src='http://'+H+':81/stream'; }
+ else { imgs[0].src=''; imgs[1].src=''; cur=0; imgs[0].style.opacity=0; imgs[1].style.opacity=0; pump(); }
+}
+document.getElementById('mSnap').onclick=function(){setMode('snap');};
+document.getElementById('mStream').onclick=function(){setMode('mjpeg');};
+var rb=document.querySelectorAll('.seg button[data-r]');
+for(var ri=0;ri<rb.length;ri++){rb[ri].onclick=function(){
+ for(var j=0;j<rb.length;j++)rb[j].className='';
+ this.className='sel'; cmd('res='+this.getAttribute('data-r'));};}
 function cmd(q){fetch('/cmd?'+q).catch(function(){});}
 function hold(id,q){var el=document.getElementById(id),iv=null;
  function go(){cmd(q);}
@@ -519,10 +578,15 @@ function stxt(s){return s==1?'moving':s==2?'still':s==3?'moving':'clear';}
 function upd(p,o){var d=document.getElementById(p+'dot'),v=document.getElementById(p+'v');
  if(o&&o.present){d.className='dot on';v.textContent=stxt(o.st)+' '+o.d+'cm';}else{d.className='dot';v.textContent='clear';}}
 function ago(t,now){var s=Math.max(0,Math.round((now-t)/1000));return s<1?'now':(s<60?s+'s':Math.floor(s/60)+'m')+' ago';}
+function bars(rssi){var n=rssi>=-60?4:rssi>=-70?3:rssi>=-80?2:1;var s='';for(var k=0;k<4;k++){var ht=4+k*3;s+='<i style="height:'+ht+'px;background:'+(k<n?'#2ea043':'#555')+'"></i>';}return s;}
 function poll(){fetch('/status').then(function(r){return r.json();}).then(function(j){
  document.getElementById('st').textContent=(j.mode?'GUARD':'manual')+' · '+j.ip;
  document.getElementById('pan').textContent=j.pan;
  document.getElementById('tilt').textContent=j.tilt;
+ document.getElementById('fps').textContent=(j.fps!=null?j.fps:'--');
+ document.getElementById('res').textContent=j.res?(' '+j.res):'';
+ document.getElementById('bars').innerHTML=bars(j.rssi==null?-100:j.rssi);
+ document.getElementById('psw').style.display=(j.psram===false?'block':'none');
  var gb=document.getElementById('guardBtn');gb.textContent='Guard Mode: '+(j.mode?'ON':'OFF');gb.className='wide'+(j.mode?' g':'');
  upd('l',j.left);upd('r',j.right);
  var h='';
@@ -531,6 +595,7 @@ function poll(){fetch('/status').then(function(r){return r.json();}).then(functi
  else h='no activity yet';
  document.getElementById('log').textContent=h;
 }).catch(function(){});}
+setMode('snap');
 setInterval(poll,1000);poll();
 </script></body></html>)HTML";
 
@@ -552,10 +617,11 @@ esp_err_t capture_handler(httpd_req_t* req) {
   camera_fb_t* fb = esp_camera_fb_get();
   if (!fb) { httpd_resp_send_500(req); return ESP_FAIL; }
   httpd_resp_set_type(req, "image/jpeg");
-  httpd_resp_set_hdr(req, "Content-Disposition", "inline; filename=snap.jpg");
   httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", "*");
+  httpd_resp_set_hdr(req, "Cache-Control", "no-store");
   esp_err_t res = httpd_resp_send(req, (const char*)fb->buf, fb->len);
   esp_camera_fb_return(fb);
+  if (res == ESP_OK) g_servedFrames++;
   return res;
 }
 
@@ -585,6 +651,7 @@ esp_err_t stream_handler(httpd_req_t* req) {
     esp_camera_fb_return(fb);
     fb = NULL;
     if (res != ESP_OK) break;   // client closed the connection
+    g_servedFrames++;
   }
   return res;
 }
@@ -609,6 +676,10 @@ esp_err_t status_handler(httpd_req_t* req) {
   out += ",\"tilt\":"; out += (int)tiltCur;
   out += ",\"now\":";  out += (uint32_t)millis();
   out += ",\"ip\":\""; out += WiFi.localIP().toString(); out += "\"";
+  out += ",\"fps\":";   out += (int)(g_fps + 0.5f);
+  out += ",\"rssi\":";  out += (int)WiFi.RSSI();
+  out += ",\"psram\":"; out += g_psram ? "true" : "false";
+  out += ",\"res\":\""; out += g_resLabel; out += "\"";
 
   out += ",\"left\":{\"present\":";  out += radarL.present ? "true" : "false";
   out += ",\"st\":"; out += radarL.state; out += ",\"d\":"; out += radarDistance(radarL); out += "}";
@@ -654,6 +725,15 @@ esp_err_t cmd_handler(httpd_req_t* req) {
       if (httpd_query_key_value(q, "clearlog", val, sizeof(val)) == ESP_OK) {
         logClear();
       }
+      if (httpd_query_key_value(q, "res", val, sizeof(val)) == ESP_OK) {
+        sensor_t* s = esp_camera_sensor_get();
+        if (s) {
+          if      (!strcmp(val, "qvga")) { s->set_framesize(s, FRAMESIZE_QVGA); g_resLabel = "QVGA"; }
+          else if (!strcmp(val, "cif"))  { s->set_framesize(s, FRAMESIZE_CIF);  g_resLabel = "CIF";  }
+          else if (!strcmp(val, "vga"))  { s->set_framesize(s, FRAMESIZE_VGA);  g_resLabel = "VGA";  }
+          else if (!strcmp(val, "svga") && g_psram) { s->set_framesize(s, FRAMESIZE_SVGA); g_resLabel = "SVGA"; }
+        }
+      }
     }
     if (q) free(q);
   }
@@ -686,8 +766,10 @@ void startServers() {
   config.server_port = 81;
   config.ctrl_port   = 32769;
   if (httpd_start(&stream_httpd, &config) == ESP_OK) {
-    httpd_uri_t u_stream = { "/stream", HTTP_GET, stream_handler, NULL };
+    httpd_uri_t u_stream = { "/stream",  HTTP_GET, stream_handler,  NULL };
+    httpd_uri_t u_scap   = { "/capture", HTTP_GET, capture_handler, NULL };
     httpd_register_uri_handler(stream_httpd, &u_stream);
+    httpd_register_uri_handler(stream_httpd, &u_scap);   // snapshot-pump uses :81/capture
     Serial.println("[WEB] stream server on :81");
   }
 }
@@ -714,6 +796,7 @@ void connectWiFi() {
   if (WiFi.status() == WL_CONNECTED) {
     Serial.print("[WiFi] connected. IP: ");
     Serial.println(WiFi.localIP());
+    Serial.printf("[WiFi] signal RSSI: %d dBm (closer to 0 = stronger; below -80 is weak)\n", WiFi.RSSI());
     statusLED(0, 30, 0);                 // green = connected
   } else {
     Serial.println("[WiFi] FAILED — check SSID/password at the top of the sketch.");
@@ -779,6 +862,14 @@ void loop() {
   uint32_t now = millis();
   if (now - lastGuardTick >= GUARD_TICK_MS) { lastGuardTick = now; guardUpdate(now); }
   if (now - lastServoTick >= SERVO_TICK_MS) { lastServoTick = now; servoTick(); }
+
+  // Stream FPS counter: frames served in the last second (shown in the web HUD).
+  static uint32_t lastFpsMs = 0, lastFrames = 0;
+  if (now - lastFpsMs >= 1000) {
+    uint32_t f = g_servedFrames;
+    g_fps = (float)(f - lastFrames) * 1000.0f / (float)(now - lastFpsMs);
+    lastFrames = f; lastFpsMs = now;
+  }
 
   // Status LED: amber in guard mode, green otherwise (only when connected).
   static uint32_t lastLed = 0;
