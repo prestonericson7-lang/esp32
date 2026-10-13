@@ -555,7 +555,7 @@ a{color:var(--acc)}
 <div id=wrap>
  <div class=card>
   <div id=vwrap>
-   <img id=vid alt="camera"><img id=vid2 alt="">
+   <img id=vid alt="camera">
    <div id=hud><span id=bars></span><span id=fps>--</span> fps<span id=res></span></div>
    <div id=psw>&#9888; PSRAM is OFF &mdash; set Tools &gt; PSRAM &gt; <b>OPI PSRAM</b> in Arduino IDE and re-flash. The feed stays slow until you do.</div>
   </div>
@@ -588,28 +588,11 @@ a{color:var(--acc)}
 </div>
 <script>
 var H=location.hostname;
-var imgs=[document.getElementById('vid'),document.getElementById('vid2')];
-var cur=0, mode='snap', busy=false, gen=0, lastReq=0;
-var FRAME_MIN_MS=66;   // cap the snapshot rate (~15fps) so the feed CANNOT starve the controls
-function capURL(){return 'http://'+H+':81/capture?x='+Date.now();}
-function pump(){
- if(mode!=='snap'||busy) return;
- var wait=FRAME_MIN_MS-(Date.now()-lastReq); if(wait<0) wait=0;
- setTimeout(doPump, wait);
-}
-function doPump(){
- if(mode!=='snap'||busy) return;
- busy=true; lastReq=Date.now(); var g=++gen; var nxt=imgs[1-cur];
- nxt.onload=function(){ busy=false; if(g!==gen||mode!=='snap') return;
-  nxt.style.opacity=1; imgs[cur].style.opacity=0; cur=1-cur; pump(); };
- nxt.onerror=function(){ busy=false; if(mode==='snap') setTimeout(pump,200); };
- nxt.src=capURL();
-}
-function setMode(m){
- gen++; busy=false; mode=m;
- if(m==='mjpeg'){ imgs[1].style.opacity=0; imgs[0].style.opacity=1; imgs[0].src='http://'+H+':81/stream'; }
- else { imgs[0].src=''; imgs[1].src=''; cur=0; imgs[0].style.opacity=0; imgs[1].style.opacity=0; pump(); }
-}
+var vid=document.getElementById('vid');
+// ONE long-lived MJPEG connection (proven to work on iPhone/Android/PC). No
+// per-frame requests, so it can NOT exhaust the socket pool and starve commands.
+function startStream(){ vid.src='http://'+H+':81/stream?x='+Date.now(); }
+vid.onerror=function(){ setTimeout(startStream, 1500); };   // auto-reconnect if the stream drops
 var rb=document.querySelectorAll('.seg button[data-r]');
 for(var ri=0;ri<rb.length;ri++){rb[ri].onclick=function(){
  for(var j=0;j<rb.length;j++)rb[j].className='';
@@ -647,7 +630,7 @@ function poll(){fetch('/status').then(function(r){return r.json();}).then(functi
  else h='no activity yet';
  document.getElementById('log').textContent=h;
 }).catch(function(){});}
-setMode('snap');
+startStream();
 setInterval(poll,1000);poll();
 </script></body></html>)HTML";
 
@@ -824,9 +807,7 @@ void startServers() {
   config.ctrl_port   = 32769;
   if (httpd_start(&stream_httpd, &config) == ESP_OK) {
     httpd_uri_t u_stream = { "/stream",  HTTP_GET, stream_handler,  NULL };
-    httpd_uri_t u_scap   = { "/capture", HTTP_GET, capture_handler, NULL };
     httpd_register_uri_handler(stream_httpd, &u_stream);
-    httpd_register_uri_handler(stream_httpd, &u_scap);   // snapshot-pump uses :81/capture
     Serial.println("[WEB] stream server on :81");
   }
 }
