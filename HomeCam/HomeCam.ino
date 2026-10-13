@@ -564,10 +564,6 @@ a{color:var(--acc)}
    <button data-r=vga>VGA<br><span class=mut>balanced</span></button>
    <button data-r=svga>SVGA<br><span class=mut>sharp</span></button>
   </div>
-  <div class=seg>
-   <button id=mSnap class=sel>Snapshot<br><span class=mut>iPhone-smooth</span></button>
-   <button id=mStream>Stream<br><span class=mut>MJPEG</span></button>
-  </div>
  </div>
  <div class=card>
   <div class=pad>
@@ -611,13 +607,9 @@ function doPump(){
 }
 function setMode(m){
  gen++; busy=false; mode=m;
- document.getElementById('mSnap').className=(m==='snap'?'sel':'');
- document.getElementById('mStream').className=(m==='mjpeg'?'sel':'');
  if(m==='mjpeg'){ imgs[1].style.opacity=0; imgs[0].style.opacity=1; imgs[0].src='http://'+H+':81/stream'; }
  else { imgs[0].src=''; imgs[1].src=''; cur=0; imgs[0].style.opacity=0; imgs[1].style.opacity=0; pump(); }
 }
-document.getElementById('mSnap').onclick=function(){setMode('snap');};
-document.getElementById('mStream').onclick=function(){setMode('mjpeg');};
 var rb=document.querySelectorAll('.seg button[data-r]');
 for(var ri=0;ri<rb.length;ri++){rb[ri].onclick=function(){
  for(var j=0;j<rb.length;j++)rb[j].className='';
