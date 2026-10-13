@@ -69,28 +69,28 @@ const char* MDNS_HOST  = "homecam";               // -> http://homecam.local
 #define RADAR_L_RX  41   // LEFT  LD2410C TX
 #define RADAR_R_RX  21   // RIGHT LD2410C TX
 
-/* =================== TILT (positional) =================== */
-#define TILT_MIN_DEG 40
-#define TILT_MAX_DEG 140
-#define TILT_CENTER  90
-#define TILT_INVERT  true     // your tilt reads reversed; set false if it flips
+/* =================== PAN — continuous, FREE 360 (pulse=speed, NO limits) ===== */
+#define PAN_INVERT   false    // flip if "left" spins the camera right
 #define SERVO_MIN_US 500
 #define SERVO_MAX_US 2500
-#define TILT_STEP    4
-#define TILT_SLEW    2.0f
-
-/* =================== PAN (continuous: pulse = speed) =================== */
-#define PAN_INVERT   false    // flip if "left" spins the camera right
-#define PAN_STOP_US  1500     // neutral/STOP (nudge +/-10..30 if it creeps)
+#define PAN_STOP_US  1500     // neutral/STOP (nudge +/-10..30 if it creeps while idle)
 #define PAN_JOG_US   180      // manual jog speed
-#define PAN_SWEEP_US 130      // guard step speed
-#define PAN_CMD_MS   300      // jog keeps moving this long; release => stop
-#define PAN_DPS_PER_US 0.25f
-#define PAN_LIMIT_DEG 100     // hard soft-limit (anti wind-up)
-#define PAN_SWEEP_RANGE 70
-#define PAN_HOME_TOL 3
-#define GUARD_MOVE_MS 500
-#define GUARD_DWELL_MS 450
+#define PAN_SWEEP_US 130      // guard sweep speed (gentler)
+#define PAN_CMD_MS   300      // a jog keeps spinning this long; release => STOP
+
+/* =================== TILT — continuous but LIMITED: boot-zero + soft limits == */
+#define TILT_INVERT  true     // flip if up/down is reversed
+#define TILT_STOP_US 1500     // neutral/STOP (nudge +/-10..30 if it creeps while idle)
+#define TILT_JOG_US  150      // tilt jog speed
+#define TILT_CMD_MS  300      // a jog keeps tilting this long; release => STOP
+#define TILT_DPS_PER_US 0.25f // est deg/sec per us (calibrate so the limit is accurate)
+#define TILT_LIMIT_DEG 45     // tilt can NEVER drive past +/- this from the boot (level) zero
+#define TILT_HOME_TOL  3      // "level" tolerance for return-to-zero
+
+/* =================== GUARD (timed sweep, not position-based) =================== */
+#define GUARD_MOVE_MS 500     // guard: step this long
+#define GUARD_DWELL_MS 450    // then stop & read the radars this long
+#define GUARD_LEG_MS  3000    // sweep each direction this long before reversing
 #define SERVO_TICK_MS 20
 #define RADAR_BLANK_MS 700
 #define SNAP_COOLDOWN_MS 15000  // min time between auto snapshots per side
@@ -101,14 +101,13 @@ const char* MDNS_HOST  = "homecam";               // -> http://homecam.local
 
 /* =================== GLOBALS =================== */
 volatile int  g_mode = 0;                 // 0 = manual, 1 = guard
-volatile int  tiltTarget = TILT_CENTER;
-volatile int  panCmdDir = 0;              // -1 L, +1 R, 0 none
-volatile uint32_t panCmdUntil = 0;
-volatile int  g_panDir = 0;
-volatile bool panHome = false;
-float tiltCur = TILT_CENTER, panPosDeg = 0;
-uint32_t lastPanMs = 0, lastServoTick = 0, lastGuardTick = 0;
-int guardDir = 1, guardPhase = 0;  uint32_t guardPhaseUntil = 0, servoBusyUntil = 0;
+// PAN: free continuous (spin direction only, no position/limits)
+volatile int  panCmdDir = 0;  volatile uint32_t panCmdUntil = 0;  volatile int g_panDir = 0;
+// TILT: continuous + dead-reckoning from boot-zero (level) + soft limits + home
+volatile int  tiltCmdDir = 0; volatile uint32_t tiltCmdUntil = 0; volatile int g_tiltDir = 0;
+volatile bool tiltHome = false;
+float tiltPosDeg = 0;  uint32_t lastTiltMs = 0, lastServoTick = 0;
+int guardDir = 1, guardPhase = 0;  uint32_t guardPhaseUntil = 0, guardLegUntil = 0, servoBusyUntil = 0;
 
 volatile float g_fps = 0;  volatile uint32_t g_servedFrames = 0;
 volatile bool g_psram = false;
@@ -216,39 +215,43 @@ void servoSetup() {
   c.channel = TILT_LEDC_CH; c.gpio_num = TILT_PIN; ledc_channel_config(&c);
 }
 
-/* =================== GUARD + PAN CONTROL =================== */
+/* =================== GUARD + SERVO CONTROL =================== */
+// Pan guard: step-scan with a TIMED sweep (no position estimate -> not aimless),
+// and when a radar sees MOVEMENT (read only while stopped) it steps toward it.
 int guardPanDir(uint32_t now) {
   if (now >= guardPhaseUntil) {
-    if (guardPhase == 0) { guardPhase = 1; guardPhaseUntil = now + GUARD_DWELL_MS; }
-    else {
+    if (guardPhase == 0) { guardPhase = 1; guardPhaseUntil = now + GUARD_DWELL_MS; }   // move -> dwell
+    else {                                                                              // dwell -> next move
       guardPhase = 0; guardPhaseUntil = now + GUARD_MOVE_MS;
       bool l = radL.moving(), r = radR.moving();
       if (l && !r) guardDir = -1; else if (r && !l) guardDir = +1;
       else if (l && r) guardDir = (radL.dist() <= radR.dist()) ? -1 : +1;
-      else { if (panPosDeg >= PAN_SWEEP_RANGE) guardDir = -1; else if (panPosDeg <= -PAN_SWEEP_RANGE) guardDir = +1; }
+      else if (now >= guardLegUntil) { guardDir = -guardDir; guardLegUntil = now + GUARD_LEG_MS; }  // timed sweep reverse
     }
   }
   return (guardPhase == 0) ? guardDir : 0;
 }
-void panControlTick(uint32_t now) {
-  uint32_t dt = now - lastPanMs; if (dt > 120) dt = 120; lastPanMs = now;
-  int dir = 0, offUs = PAN_JOG_US;
-  if (g_mode == 1) { offUs = PAN_SWEEP_US; dir = guardPanDir(now); }
-  else if (panHome) { float ap = panPosDeg < 0 ? -panPosDeg : panPosDeg;
-    if (ap <= PAN_HOME_TOL) { panHome = false; dir = 0; } else dir = (panPosDeg > 0) ? -1 : +1; }
-  else dir = (now < panCmdUntil) ? panCmdDir : 0;
-  if (dir < 0 && panPosDeg <= -PAN_LIMIT_DEG) dir = 0;
-  if (dir > 0 && panPosDeg >=  PAN_LIMIT_DEG) dir = 0;
-  if (dir != 0) { panPosDeg += dir * (offUs * PAN_DPS_PER_US) * (dt / 1000.0f); servoBusyUntil = now + RADAR_BLANK_MS; }
+void panTick(uint32_t now) {                 // PAN = FREE continuous, no limits
+  int dir, off;
+  if (g_mode == 1) { dir = guardPanDir(now); off = PAN_SWEEP_US; }
+  else { dir = (now < panCmdUntil) ? panCmdDir : 0; off = PAN_JOG_US; }
+  if (dir != 0) servoBusyUntil = now + RADAR_BLANK_MS;
   g_panDir = dir;
-  servoRawUs(PAN_LEDC_CH, PAN_STOP_US + (dir == 0 ? 0 : (PAN_INVERT ? -dir : dir) * offUs));
+  servoRawUs(PAN_LEDC_CH, PAN_STOP_US + (dir == 0 ? 0 : (PAN_INVERT ? -dir : dir) * off));
 }
-void servoTick(uint32_t now) {
-  float tt = (float)tiltTarget;
-  if (tiltCur < tt) tiltCur = min(tt, tiltCur + TILT_SLEW); else if (tiltCur > tt) tiltCur = max(tt, tiltCur - TILT_SLEW);
-  servoAngle(TILT_LEDC_CH, tiltCur, TILT_INVERT);
-  panControlTick(now);
+void tiltTick(uint32_t now) {                // TILT = continuous + dead reckoning + soft limits + zero
+  uint32_t dt = now - lastTiltMs; if (dt > 120) dt = 120; lastTiltMs = now;
+  int dir = 0;
+  if (tiltHome) { float a = tiltPosDeg < 0 ? -tiltPosDeg : tiltPosDeg;
+    if (a <= TILT_HOME_TOL) { tiltHome = false; dir = 0; } else dir = (tiltPosDeg > 0) ? -1 : +1; }
+  else dir = (now < tiltCmdUntil) ? tiltCmdDir : 0;
+  if (dir < 0 && tiltPosDeg <= -TILT_LIMIT_DEG) dir = 0;      // never drive past the tilt limit
+  if (dir > 0 && tiltPosDeg >=  TILT_LIMIT_DEG) dir = 0;
+  if (dir != 0) tiltPosDeg += dir * (TILT_JOG_US * TILT_DPS_PER_US) * (dt / 1000.0f);
+  g_tiltDir = dir;
+  servoRawUs(TILT_LEDC_CH, TILT_STOP_US + (dir == 0 ? 0 : (TILT_INVERT ? -dir : dir) * TILT_JOG_US));
 }
+void servoTick(uint32_t now) { tiltTick(now); panTick(now); }
 
 /* =================== RADAR POLL (+ log + snapshot on new motion) =============== */
 void radarPoll() {
@@ -267,11 +270,11 @@ void radarPoll() {
 /* =================== COMMANDS (servo instant; snapshot deferred) =============== */
 void handleCmd(const String &cRaw) {
   String c = cRaw; c.trim();
-  if (c == "left")   { g_mode = 0; panHome = false; panCmdDir = -1; panCmdUntil = millis() + PAN_CMD_MS; }
-  else if (c == "right") { g_mode = 0; panHome = false; panCmdDir = +1; panCmdUntil = millis() + PAN_CMD_MS; }
-  else if (c == "up")    { g_mode = 0; tiltTarget = clampi(tiltTarget + TILT_STEP, TILT_MIN_DEG, TILT_MAX_DEG); }
-  else if (c == "down")  { g_mode = 0; tiltTarget = clampi(tiltTarget - TILT_STEP, TILT_MIN_DEG, TILT_MAX_DEG); }
-  else if (c == "center"){ g_mode = 0; panCmdDir = 0; panCmdUntil = 0; panHome = true; tiltTarget = TILT_CENTER; }
+  if (c == "left")   { g_mode = 0; panCmdDir = -1; panCmdUntil = millis() + PAN_CMD_MS; }     // pan jog (free)
+  else if (c == "right") { g_mode = 0; panCmdDir = +1; panCmdUntil = millis() + PAN_CMD_MS; }
+  else if (c == "up")    { g_mode = 0; tiltHome = false; tiltCmdDir = +1; tiltCmdUntil = millis() + TILT_CMD_MS; }  // tilt jog (limited)
+  else if (c == "down")  { g_mode = 0; tiltHome = false; tiltCmdDir = -1; tiltCmdUntil = millis() + TILT_CMD_MS; }
+  else if (c == "center"){ g_mode = 0; panCmdDir = 0; panCmdUntil = 0; tiltHome = true; }      // pan STOP, tilt -> zero(level)
   else if (c == "guard1"){ g_mode = 1; }
   else if (c == "guard0"){ g_mode = 0; }
   else if (c == "snap")  { wantSnapManual = true; }
@@ -301,7 +304,7 @@ button:active{background:var(--acc)}.wide{width:100%;padding:13px}
   <div class=pad><span></span><button id=bu>&#9650;</button><span></span>
    <button id=bl>&#9664;</button><button id=bc>&#9632;</button><button id=br>&#9654;</button>
    <span></span><button id=bd>&#9660;</button><span></span></div>
-  <div class=mut style="text-align:center;margin-top:8px">Pan <span id=pan>&#9632;</span> &middot; Tilt <span id=tilt>90</span>&deg; &middot; <span id=fps>0</span>fps</div>
+  <div class=mut style="text-align:center;margin-top:8px">Pan <span id=pan>&#9632;</span> &middot; Tilt <span id=tilt>&#9632; 0&deg;</span> &middot; <span id=fps>0</span>fps</div>
  </div>
  <div class=card>
   <button id=gB class=wide>Guard Mode: OFF</button>
@@ -334,8 +337,9 @@ function up(p,o){var d=$(p+'d'),v=$(p+'v');if(!o||!o.rx){d.className='dot';v.sty
 function ago(t,n){var s=Math.max(0,Math.round((n-t)/1000));return s<1?'now':(s<60?s+'s':Math.floor(s/60)+'m')+' ago';}
 function poll(){fetch('/status').then(function(r){return r.json();}).then(function(j){
  $('st').textContent=(j.mode?'GUARD':'manual')+' · '+j.ip;
- $('pan').textContent=(j.panspin<0?'◄':(j.panspin>0?'►':'■'))+' '+j.panpos+'°';
- $('tilt').textContent=j.tilt;$('fps').textContent=j.fps;$('sd').textContent=j.sd?'ready':'no card';
+ $('pan').textContent=(j.panspin<0?'◄':(j.panspin>0?'►':'■'));
+ $('tilt').textContent=(j.tiltdir<0?'▼':(j.tiltdir>0?'▲':'■'))+' '+j.tiltpos+'°';
+ $('fps').textContent=j.fps;$('sd').textContent=j.sd?'ready':'no card';
  var g=$('gB');g.textContent='Guard Mode: '+(j.mode?'ON':'OFF');g.className='wide'+(j.mode?' g':'');
  up('l',j.left);up('r',j.right);
  var h='';if(j.log&&j.log.length){for(var i=0;i<j.log.length;i++){var e=j.log[i];h+=ago(e.t,j.now)+'  '+e.k+(e.d?' '+e.d+'cm':'')+'\n';}}else h='no activity yet';
@@ -372,7 +376,7 @@ static esp_err_t statusHandler(httpd_req_t *req) {
   logj += "]";
   bool wc = WiFi.status() == WL_CONNECTED;
   String js = "{\"ip\":\"" + (wc ? WiFi.localIP().toString() : String("connecting")) + "\",\"mode\":" + g_mode +
-    ",\"panspin\":" + g_panDir + ",\"panpos\":" + (int)panPosDeg + ",\"tilt\":" + (int)tiltCur + ",\"fps\":" + String(g_fps, 1) +
+    ",\"panspin\":" + g_panDir + ",\"tiltdir\":" + g_tiltDir + ",\"tiltpos\":" + (int)tiltPosDeg + ",\"fps\":" + String(g_fps, 1) +
     ",\"sd\":" + (sdOk ? 1 : 0) +
     ",\"left\":{\"rx\":" + radL.frames + ",\"present\":" + (radL.present() ? "true" : "false") + ",\"moving\":" + (radL.moving() ? "true" : "false") + ",\"d\":" + radL.dist() + "}" +
     ",\"right\":{\"rx\":" + radR.frames + ",\"present\":" + (radR.present() ? "true" : "false") + ",\"moving\":" + (radR.moving() ? "true" : "false") + ",\"d\":" + radR.dist() + "}" +
@@ -455,9 +459,9 @@ void setup() {
   if (sdOk) { SD_MMC.mkdir("/snaps"); Serial.println("[SD] ready"); } else Serial.println("[SD] no card - logging/snaps off");
 
   servoSetup();
-  servoRawUs(PAN_LEDC_CH, PAN_STOP_US);
-  servoAngle(TILT_LEDC_CH, tiltCur, TILT_INVERT);
-  panPosDeg = 0; lastPanMs = millis();
+  servoRawUs(PAN_LEDC_CH, PAN_STOP_US);        // pan: free continuous, stopped at boot
+  servoRawUs(TILT_LEDC_CH, TILT_STOP_US);      // tilt: continuous, stopped at boot
+  tiltPosDeg = 0; lastTiltMs = millis();       // tilt boot angle = zero (level)
 
   RadarLSer.begin(256000, SERIAL_8N1, RADAR_L_RX, -1);
   RadarRSer.begin(256000, SERIAL_8N1, RADAR_R_RX, -1);
